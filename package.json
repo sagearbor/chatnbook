@@ -1,0 +1,19 @@
+{
+  "name": "ai-smb-scheduler",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "tools/*",
+    "platforms_out/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "generate:adapter": "ts-node tools/adapter-gen/index.ts --manifest"
+  },
+  "devDependencies": {
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4",
+    "turbo": "^2.0.4"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "@context": "https://schema.org",
+  "@type": "LocalBusiness",
+  "name": "{{business_name}}",
+  "url": "{{business_url}}",
+  "openingHours": "{{opening_hours}}",
+  "potentialAction": {
+    "@type": "ScheduleAction",
+    "target": {
+      "@type": "EntryPoint",
+      "urlTemplate": "{{api_base}}/v1/appointments",
+      "httpMethod": "POST",
+      "encodingType": "application/json"
+    },
+    "instrument": "{{api_base}}/openapi.json",
+    "requiresConfirmation": "{{requires_confirmation}}",
+    "result": {
+      "@type": "Event",
+      "name": "Service Appointment"
+    }
+  }
+}

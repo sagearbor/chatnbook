@@ -1,0 +1,88 @@
+version: 1.0
+title: AI-Native Chat + Agent-Ready Scheduling for SMBs
+meta:
+  goal: >
+    Deliver a human-friendly chat/booking widget AND an agent-discoverable scheduling API
+    that connects to each SMB’s existing calendar (Google/Microsoft first; ICS read-only fallback).
+    One-click WordPress install, JSON-LD discovery, OpenAPI endpoints, OAuth, and an agent-friendly DOM fallback.
+  roles:
+    - { id: PM,  name: Product Manager }
+    - { id: BE,  name: Backend Engineer }
+    - { id: FE,  name: Frontend/Web Widget Engineer }
+    - { id: WP,  name: WordPress Plugin Engineer }
+    - { id: SEC, name: Security/Infra }
+    - { id: DS,  name: Data/Analytics }
+    - { id: DX,  name: DevRel/Docs }
+  enums:
+    status: [todo, partial, done, blocked, n/a]
+    priority: [P0, P1, P2]
+  notes:
+    - Start cheap with gpt-5-nano; escalate on low-confidence only.
+    - Calendar writes require OAuth or hosted calendar; ICS is read-only.
+architecture:
+  components:
+    - { id: api, desc: Booking API + availability + OpenAPI }
+    - { id: connectors, desc: Google, Microsoft, ICS }
+    - { id: discovery, desc: JSON-LD + well-known endpoints }
+    - { id: widget, desc: Web widget loader + UI }
+    - { id: wp_plugin, desc: WordPress wrapper (inject + OAuth UI) }
+    - { id: adapters, desc: MCP server + A2A placeholder }
+    - { id: security, desc: HMAC, rate limits, secrets, PII }
+    - { id: observability, desc: logs, metrics, SLOs }
+    - { id: ops, desc: CI/CD, migrations, rollbacks }
+phases:
+  - id: P0
+    name: Discovery & Specs
+    status: partial
+    tasks:
+      - { id: P0-1, title: MVP definition + non-goals, owner: PM, status: partial }
+      - { id: P0-2, title: Data model & lifecycle, owner: BE, status: todo }
+      - { id: P0-3, title: OpenAPI first draft, owner: BE, status: todo }
+      - { id: P0-4, title: Security baseline, owner: SEC, status: todo }
+  - id: P1
+    name: Core API + DB + Booking Logic
+    status: todo
+    tasks:
+      - { id: P1-1, title: Repo bootstrap + healthcheck, owner: BE, status: todo }
+      - { id: P1-2, title: Availability engine + DST tests, owner: BE, status: todo }
+      - { id: P1-3, title: Booking engine idempotent, owner: BE, status: todo }
+      - { id: P1-4, title: Notification service, owner: BE, status: todo }
+  - id: P2
+    name: Calendar Connectors
+    status: todo
+    tasks:
+      - { id: P2-1, title: Google OAuth read/write, owner: BE, status: todo }
+      - { id: P2-2, title: Microsoft Graph read/write, owner: BE, status: todo }
+      - { id: P2-3, title: ICS read-only + confirm workflow, owner: BE, status: todo }
+  - id: P3
+    name: Discovery Layer
+    status: todo
+    tasks:
+      - { id: P3-1, title: JSON-LD generator, owner: BE, status: todo }
+      - { id: P3-2, title: Injection (client + WP server), owner: FE, status: todo }
+      - { id: P3-3, title: Well-known endpoints, owner: BE, status: todo }
+  - id: P4
+    name: Widget (human + agent-friendly)
+    status: todo
+    tasks:
+      - { id: P4-1, title: Loader script (async + CSP), owner: FE, status: todo }
+      - { id: P4-2, title: Chat + booking UI, owner: FE, status: todo }
+      - { id: P4-3, title: Agent DOM mode (?agent=1), owner: FE, status: todo }
+  - id: P5
+    name: WordPress plugin
+    status: todo
+    tasks:
+      - { id: P5-1, title: Plugin skeleton + settings, owner: WP, status: todo }
+      - { id: P5-2, title: Script + JSON-LD injection, owner: WP, status: todo }
+      - { id: P5-3, title: OAuth UI (Google/MS), owner: WP, status: todo }
+  - id: P6
+    name: Agent adapters
+    status: todo
+    tasks:
+      - { id: P6-1, title: MCP tool server (list/create/cancel), owner: BE, status: todo }
+definitions_of_done:
+  mvp:
+    - "WP plugin installs; script + JSON-LD present"
+    - "Google OAuth read/write; ICS fallback works"
+    - "OpenAPI accurate; sample agent can book end-to-end"
+    - "Widget a11y AA; keyboard-only OK"

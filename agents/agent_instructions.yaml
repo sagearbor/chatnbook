@@ -1,0 +1,197 @@
+project_name: ai-smb-agent-ready-scheduler
+version: 1.0
+
+mission: >
+  Build a human-friendly chat/booking widget AND an agent-discoverable scheduling API
+  that connects to an SMB’s existing calendar (Google/Microsoft; ICS read-only fallback).
+  Prefer the cheapest viable LLM path (gpt-5-nano), with clear escalation rules.
+
+objectives:
+  - One-click WordPress install that injects the widget + JSON-LD.
+  - OpenAPI-first booking endpoints so agents call APIs instead of GUIs.
+  - GUI remains accessible + deterministic for agent fallback.
+  - Calendar writes via OAuth; ICS only for read availability.
+  - Abuse-safe: HMAC for agent calls, rate limits, no PII in logs.
+
+principles:
+  - API-first: JSON-LD advertises actions; OpenAPI specifies how.
+  - Low-friction install: universal script + WP plugin wrapper.
+  - Cost awareness: keep LLM out of critical path; cache small talk.
+  - Determinism: stable DOM IDs/ARIA for GUI fallback.
+  - Security-by-default: OAuth for writes; HMAC + rate limits for agents.
+
+llm_routing:
+  primary_model: gpt-5-nano
+  fallback_model: gpt-5-mini
+  escalate_when:
+    - model_confidence < 0.35
+    - user_intent_ambiguous AND retry_extraction_failed
+    - policy_risk_detected (PII/PHI/payment)
+  hard_limits:
+    max_input_tokens: 4000
+    max_output_tokens: 800
+  prompts:
+    style: "brief, unambiguous, stepwise when extracting structured fields"
+    extraction_hint: "Return JSON only when asked for booking fields."
+
+repository_layout:
+  root: "."
+  paths:
+    api_openapi: "packages/api/openapi/openapi.yaml"
+    api_server: "packages/api/src/index.ts"
+    discovery_jsonld_template: "packages/discovery/jsonld_template.json"
+    discovery_well_known: "packages/discovery/well_known.ts"
+    widget_loader: "packages/widget/src/loader.ts"
+    connectors_python_pkg: "packages/connectors-py"
+    tests_python: "packages/connectors-py/tests"
+    wp_manifest: "platforms/wordpress.manifest.yaml"
+    adapter_generator: "tools/adapter-gen/index.ts"
+    env_example: ".env.example"
+    plan: "plan.yaml"
+
+setup:
+  prerequisites:
+    - "Node.js >= 20, pnpm >= 9 (corepack ok)"
+    - "Python >= 3.9"
+    - "Docker (for Postgres/Redis in dev)"
+  steps:
+    - "corepack enable && corepack prepare pnpm@9 --activate"
+    - "pnpm i"
+    - "docker compose -f infra/docker-compose.dev.yml up -d"
+    - "pnpm -r build"
+    - "python -m venv .venv && source .venv/bin/activate"
+    - "pip install -r packages/connectors-py/requirements.txt"
+
+commands:
+  api_dev: "pnpm --filter @smb/api dev"
+  build_all: "pnpm -r build"
+  generate_wp: "pnpm generate:adapter --manifest platforms/wordpress.manifest.yaml"
+  test_default: "pytest"               # uses pytest.ini defaults (testdox)
+  test_verbose: "pytest -vv -rP"
+  test_slowest: "pytest --durations=5"
+
+interfaces:
+  openapi:
+    path: "packages/api/openapi/openapi.yaml"
+    must_expose_json: "/openapi.json and /.well-known/openapi.json"
+    required_paths:
+      - "GET /v1/services"
+      - "GET /v1/availability?serviceId&start&end&tz"
+      - "POST /v1/appointments"
+      - "POST /v1/appointments/{id}/cancel"
+      - "POST /v1/appointments/{id}/reschedule"
+  discovery:
+    jsonld_template: "packages/discovery/jsonld_template.json"
+    well_known: "/.well-known/ai-actions.json -> list actions + link to /openapi.json"
+    schema_org: "LocalBusiness + ScheduleAction + EntryPoint"
+  widget:
+    embed: "<script src='https://cdn.example.com/widget.js' async data-account='acct_xxx'></script>"
+    a11y: "WCAG AA, keyboard-only OK, ARIA roles"
+    agent_mode: "query param ?agent=1 to simplify UI; expose stable data-* selectors"
+  calendars:
+    google: "OAuth 2.0 (read/write)"
+    microsoft: "Graph OAuth (read/write)"
+    ics: "read-only availability; bookings set to pending confirmation"
+
+workflows:
+  human_booking:
+    - "Widget → availability → create appointment → confirm via email/SMS"
+    - "If ICS-only, mark as 'tentative' and notify owner to confirm"
+  agent_booking:
+    - "Agent discovers JSON-LD → fetches OpenAPI → calls /v1 endpoints"
+    - "HMAC auth for agent calls; bypass CAPTCHA; rate-limit per account"
+  wp_install:
+    - "Install plugin → Connect Google/Microsoft (OAuth) → set services/hours → widget + JSON-LD auto-injected"
+
+security_guardrails:
+  oauth_writes_only: true
+  hmac_for_agents:
+    header: "X-Signature: base64(hmac_sha256(secret, nonce|ts|body))"
+    replay_window_sec: 300
+  rate_limits:
+    human_gui_per_ip_per_min: 60
+    agent_api_per_account_per_min: 120
+    create_appointment_per_account_per_min: 5
+  pii:
+    log_scrub: ["email", "phone"]
+    encrypted_at_rest: true
+
+logging_metrics:
+  logs:
+    fields: [request_id, route, status_code, latency_ms, source(human|agent|api)]
+    redactions: ["email", "phone"]
+  metrics:
+    - installs_total
+    - jsonld_fetch_total
+    - openapi_fetch_total
+    - availability_calls
+    - appointment_create_attempts
+    - appointment_create_success
+    - oauth_errors
+    - calendar_write_errors
+
+testing:
+  framework: "pytest"
+  default_cli: "pytest"            # testdox style via pytest.ini
+  plugins:
+    - "pytest-testdox"
+  style:
+    - "Group related checks in classes: TestGoogleBusyMerge, TestDSTHandling, TestEdgeCases"
+    - "Use concise docstrings; testdox prints them as one-line results"
+    - "Use parametrization with ids= for readable case names"
+  coverage_focus:
+    - "Availability math: DST, adjacency, buffers"
+    - "Double-book prevention under contention"
+    - "OAuth token refresh/revoke"
+    - "ICS read-only path with 'requiresConfirmation'"
+  pass_criteria:
+    - "All tests PASS in CI with testdox output"
+    - "No plaintext PII in logs (assert scrubbing when logging)"
+
+definition_of_done:
+  mvp:
+    - "WP plugin installs; injects script + JSON-LD"
+    - "Google OAuth read/write; ICS read-only fallback works"
+    - "/openapi.json accurate; sample agent can create/cancel"
+    - "Widget a11y AA; keyboard-only works"
+    - "Basic rate limits + HMAC enabled for agent endpoints"
+
+escalation:
+  to_higher_llm:
+    - "Low confidence extraction"
+    - "Ambiguous intent after 1 retry"
+  to_human:
+    - "3 consecutive booking failures"
+    - "OAuth consent errors > 3 for same account in 10m"
+    - "Calendar write 5xx > 5 in 10m"
+
+env_vars_required:
+  - DATABASE_URL
+  - REDIS_URL
+  - JWT_SECRET
+  - GOOGLE_CLIENT_ID
+  - GOOGLE_CLIENT_SECRET
+  - GOOGLE_REDIRECT_URI
+  - MS_CLIENT_ID
+  - MS_CLIENT_SECRET
+  - MS_REDIRECT_URI
+  - AGENT_HMAC_SECRET
+  - STRIPE_SECRET
+  - STRIPE_WEBHOOK_SECRET
+
+conventions:
+  git_branching:
+    - "main: stable"
+    - "feat/*, fix/*, chore/*"
+  commits:
+    - "feat(api): add create appointment endpoint"
+    - "fix(connectors): handle DST merge case"
+  code_style:
+    typescript: "strict, noImplicitAny; prefer pure functions"
+    python: "black/pep8 style; small, testable units"
+
+ai_dev_notes:
+  - "Read this file first; follow interfaces + env vars."
+  - "Do not commit secrets; use .env and secret manager."
+  - "Prefer writing tests first for availability math."
+  - "When unsure, prefer OpenAPI + JSON-LD clarity over GUI tricks."

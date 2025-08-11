@@ -1,0 +1,7 @@
+{
+  "tools": [
+    "listAvailability",
+    "createAppointment",
+    "cancelAppointment"
+  ]
+}

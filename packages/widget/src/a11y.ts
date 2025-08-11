@@ -1,0 +1,1 @@
+export const a11y = { roleDialog: 'dialog', roleButton: 'button' };
