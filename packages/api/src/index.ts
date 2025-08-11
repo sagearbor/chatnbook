@@ -3,10 +3,36 @@ import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { wellKnown } from '../../discovery/well_known';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Basic IP-based rate limiter: 60 req/min
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX = 60;
+const hits = new Map<string, { count: number; first: number }>();
+
+function rateLimit(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
+  const now = Date.now();
+  const ip = req.ip || 'unknown';
+  const entry = hits.get(ip);
+  if (!entry || now - entry.first > RATE_LIMIT_WINDOW_MS) {
+    hits.set(ip, { count: 1, first: now });
+    return next();
+  }
+  if (entry.count >= RATE_LIMIT_MAX) {
+    return res.status(429).json({ error: 'Rate limit exceeded' });
+  }
+  entry.count++;
+  next();
+}
+app.use(rateLimit);
 
 const AGENT_HMAC_SECRET = process.env.AGENT_HMAC_SECRET || '';
 
@@ -25,6 +51,8 @@ function verifyHmac(req: express.Request, res: express.Response, next: express.N
   }
   next();
 }
+
+app.use(wellKnown);
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
