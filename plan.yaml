@@ -33,15 +33,15 @@ architecture:
 phases:
   - id: P0
     name: Discovery & Specs
-    status: partial
+    status: done
     tasks:
-      - { id: P0-1, title: MVP definition + non-goals, owner: PM, status: partial }
-      - { id: P0-2, title: Data model & lifecycle, owner: BE, status: partial }
+      - { id: P0-1, title: MVP definition + non-goals, owner: PM, status: done }
+      - { id: P0-2, title: Data model & lifecycle, owner: BE, status: done }
       - { id: P0-3, title: OpenAPI first draft, owner: BE, status: done }
       - { id: P0-4, title: Security baseline, owner: SEC, status: done }
   - id: P1
     name: Core API + DB + Booking Logic
-    status: todo
+    status: done
     tasks:
       - { id: P1-1, title: Repo bootstrap + healthcheck, owner: BE, status: done }
       - { id: P1-2, title: Availability engine + DST tests, owner: BE, status: done }
@@ -49,11 +49,11 @@ phases:
       - { id: P1-4, title: Notification service, owner: BE, status: done }
   - id: P2
     name: Calendar Connectors
-    status: todo
+    status: partial
     tasks:
       - { id: P2-1, title: Google OAuth read/write, owner: BE, status: todo }
       - { id: P2-2, title: Microsoft Graph read/write, owner: BE, status: todo }
-      - { id: P2-3, title: ICS read-only + confirm workflow, owner: BE, status: todo }
+      - { id: P2-3, title: ICS read-only + confirm workflow, owner: BE, status: done }
   - id: P3
     name: Discovery Layer
     status: partial
