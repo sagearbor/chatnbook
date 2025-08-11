@@ -3,9 +3,9 @@ import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { wellKnown } from '../../discovery/well_known';
+import { wellKnown } from '../../discovery/well_known.js';
 
-const app = express();
+export const app = express();
 app.use(cors());
 app.use(express.json());
 
@@ -35,6 +35,13 @@ function rateLimit(
 app.use(rateLimit);
 
 const AGENT_HMAC_SECRET = process.env.AGENT_HMAC_SECRET || '';
+
+// Simple in-memory idempotency store
+const idempotencyStore = new Map<string, unknown>();
+
+export function resetIdempotency() {
+  idempotencyStore.clear();
+}
 
 function verifyHmac(req: express.Request, res: express.Response, next: express.NextFunction) {
   if (!AGENT_HMAC_SECRET) {
@@ -66,9 +73,18 @@ app.get(['/openapi.json', '/.well-known/openapi.json'], (_req, res) => {
 // Stubs
 app.get('/v1/services', (_req, res) => res.json({ services: [] }));
 app.get('/v1/availability', (_req, res) => res.json({ slots: [] }));
-app.post('/v1/appointments', verifyHmac, (_req, res) =>
-  res.status(201).json({ id: 'apt_stub', status: 'requested' })
-);
+app.post('/v1/appointments', verifyHmac, (req, res) => {
+  const key = req.header('Idempotency-Key');
+  if (!key) {
+    return res.status(400).json({ error: 'Idempotency-Key required' });
+  }
+  if (idempotencyStore.has(key)) {
+    return res.status(200).json(idempotencyStore.get(key));
+  }
+  const response = { id: crypto.randomUUID(), status: 'requested' };
+  idempotencyStore.set(key, response);
+  res.status(201).json(response);
+});
 app.post('/v1/appointments/:id/cancel', verifyHmac, (req, res) =>
   res.json({ id: req.params.id, status: 'canceled' })
 );
@@ -76,5 +92,7 @@ app.post('/v1/appointments/:id/reschedule', verifyHmac, (req, res) =>
   res.json({ id: req.params.id, status: 'confirmed' })
 );
 
-const port = process.env.PORT || 3000;
-app.listen(port, () => console.log(`API listening on :${port}`));
+if (process.env.NODE_ENV !== 'test') {
+  const port = process.env.PORT || 3000;
+  app.listen(port, () => console.log(`API listening on :${port}`));
+}
