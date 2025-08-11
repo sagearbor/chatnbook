@@ -1,8 +1,9 @@
 import express from 'express';
 import cors from 'cors';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import crypto from 'crypto';
+import { sendNotification, extractContact } from './notify.js';
 import { wellKnown } from '../../discovery/well_known.js';
 
 export const app = express();
@@ -83,14 +84,19 @@ app.post('/v1/appointments', verifyHmac, (req, res) => {
   }
   const response = { id: crypto.randomUUID(), status: 'requested' };
   idempotencyStore.set(key, response);
+  sendNotification({ to: extractContact(req), type: 'appointment_requested', payload: response });
   res.status(201).json(response);
 });
-app.post('/v1/appointments/:id/cancel', verifyHmac, (req, res) =>
-  res.json({ id: req.params.id, status: 'canceled' })
-);
-app.post('/v1/appointments/:id/reschedule', verifyHmac, (req, res) =>
-  res.json({ id: req.params.id, status: 'confirmed' })
-);
+app.post('/v1/appointments/:id/cancel', verifyHmac, (req, res) => {
+  const response = { id: req.params.id, status: 'canceled' };
+  sendNotification({ to: extractContact(req), type: 'appointment_canceled', payload: response });
+  res.json(response);
+});
+app.post('/v1/appointments/:id/reschedule', verifyHmac, (req, res) => {
+  const response = { id: req.params.id, status: 'confirmed' };
+  sendNotification({ to: extractContact(req), type: 'appointment_rescheduled', payload: response });
+  res.json(response);
+});
 
 if (process.env.NODE_ENV !== 'test') {
   const port = process.env.PORT || 3000;
