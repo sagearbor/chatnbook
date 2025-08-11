@@ -66,8 +66,8 @@ phases:
     status: todo
     tasks:
       - { id: P4-1, title: Loader script (async + CSP), owner: FE, status: done }
-      - { id: P4-2, title: Chat + booking UI, owner: FE, status: todo }
-      - { id: P4-3, title: Agent DOM mode (?agent=1), owner: FE, status: todo }
+      - { id: P4-2, title: Chat + booking UI, owner: FE, status: done }
+      - { id: P4-3, title: Agent DOM mode (?agent=1), owner: FE, status: done }
   - id: P5
     name: WordPress plugin
     status: todo
