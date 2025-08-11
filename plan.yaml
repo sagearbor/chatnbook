@@ -49,17 +49,17 @@ phases:
       - { id: P1-4, title: Notification service, owner: BE, status: done }
   - id: P2
     name: Calendar Connectors
-    status: partial
+    status: done
     tasks:
-      - { id: P2-1, title: Google OAuth read/write, owner: BE, status: todo }
-      - { id: P2-2, title: Microsoft Graph read/write, owner: BE, status: todo }
+      - { id: P2-1, title: Google OAuth read/write, owner: BE, status: done }
+      - { id: P2-2, title: Microsoft Graph read/write, owner: BE, status: done }
       - { id: P2-3, title: ICS read-only + confirm workflow, owner: BE, status: done }
   - id: P3
     name: Discovery Layer
-    status: partial
+    status: done
     tasks:
       - { id: P3-1, title: JSON-LD generator, owner: BE, status: done }
-      - { id: P3-2, title: Injection (client + WP server), owner: FE, status: todo }
+      - { id: P3-2, title: Injection (client + WP server), owner: FE, status: done }
       - { id: P3-3, title: Well-known endpoints, owner: BE, status: done }
   - id: P4
     name: Widget (human + agent-friendly)
