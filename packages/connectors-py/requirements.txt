@@ -2,3 +2,5 @@ pytz
 pytest
 pytest-testdox
 icalendar
+requests
+responses
