@@ -58,7 +58,7 @@ phases:
     name: Discovery Layer
     status: partial
     tasks:
-      - { id: P3-1, title: JSON-LD generator, owner: BE, status: todo }
+      - { id: P3-1, title: JSON-LD generator, owner: BE, status: done }
       - { id: P3-2, title: Injection (client + WP server), owner: FE, status: todo }
       - { id: P3-3, title: Well-known endpoints, owner: BE, status: done }
   - id: P4
