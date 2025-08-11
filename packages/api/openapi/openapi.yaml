@@ -57,6 +57,8 @@ paths:
   /v1/appointments:
     post:
       summary: Create appointment
+      security:
+        - hmac: []
       requestBody:
         required: true
         content:
@@ -73,6 +75,8 @@ paths:
   /v1/appointments/{id}/cancel:
     post:
       summary: Cancel appointment
+      security:
+        - hmac: []
       parameters:
         - in: path
           name: id
@@ -88,6 +92,8 @@ paths:
   /v1/appointments/{id}/reschedule:
     post:
       summary: Reschedule appointment
+      security:
+        - hmac: []
       parameters:
         - in: path
           name: id
@@ -109,6 +115,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/AppointmentResponse'
 components:
+  securitySchemes:
+    hmac:
+      type: apiKey
+      in: header
+      name: X-Signature
   schemas:
     Service:
       type: object

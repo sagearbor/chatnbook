@@ -37,13 +37,13 @@ phases:
     tasks:
       - { id: P0-1, title: MVP definition + non-goals, owner: PM, status: partial }
       - { id: P0-2, title: Data model & lifecycle, owner: BE, status: todo }
-      - { id: P0-3, title: OpenAPI first draft, owner: BE, status: todo }
-      - { id: P0-4, title: Security baseline, owner: SEC, status: todo }
+      - { id: P0-3, title: OpenAPI first draft, owner: BE, status: done }
+      - { id: P0-4, title: Security baseline, owner: SEC, status: partial }
   - id: P1
     name: Core API + DB + Booking Logic
     status: todo
     tasks:
-      - { id: P1-1, title: Repo bootstrap + healthcheck, owner: BE, status: todo }
+      - { id: P1-1, title: Repo bootstrap + healthcheck, owner: BE, status: done }
       - { id: P1-2, title: Availability engine + DST tests, owner: BE, status: todo }
       - { id: P1-3, title: Booking engine idempotent, owner: BE, status: todo }
       - { id: P1-4, title: Notification service, owner: BE, status: todo }
