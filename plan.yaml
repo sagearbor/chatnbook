@@ -46,7 +46,7 @@ phases:
       - { id: P1-1, title: Repo bootstrap + healthcheck, owner: BE, status: done }
       - { id: P1-2, title: Availability engine + DST tests, owner: BE, status: done }
       - { id: P1-3, title: Booking engine idempotent, owner: BE, status: done }
-      - { id: P1-4, title: Notification service, owner: BE, status: todo }
+      - { id: P1-4, title: Notification service, owner: BE, status: done }
   - id: P2
     name: Calendar Connectors
     status: todo
@@ -65,7 +65,7 @@ phases:
     name: Widget (human + agent-friendly)
     status: todo
     tasks:
-      - { id: P4-1, title: Loader script (async + CSP), owner: FE, status: todo }
+      - { id: P4-1, title: Loader script (async + CSP), owner: FE, status: done }
       - { id: P4-2, title: Chat + booking UI, owner: FE, status: todo }
       - { id: P4-3, title: Agent DOM mode (?agent=1), owner: FE, status: todo }
   - id: P5
