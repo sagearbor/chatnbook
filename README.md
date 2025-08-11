@@ -36,6 +36,7 @@ curl http://localhost:3000/openapi.json
 
 - `plan.yaml`: AI-editable development checklist.
 - `agents/agent_instructions.yaml`: instructions file for AI dev bots.
+- `docs/mvp.md`: MVP definition and non-goals.
 
 ## Testing
 We use `pytest` with the `pytest-testdox` plugin for readable output.
@@ -48,3 +49,4 @@ pytest                           # prints grouped, one-line checks
 ### If you don’t like the default style, override it:
 Verbose: pytest -vv -rP
 Show durations: pytest --durations=5
+

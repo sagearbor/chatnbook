@@ -2,11 +2,22 @@
 
 ## Entities
 
+### Account
+- `id`: unique business identifier
+- `email`: owner contact
+- `createdAt`: ISO-8601 timestamp
+
 ### Service
 - `id`: unique identifier
 - `name`: display name
 - `durationMinutes`: length of appointment
 - `timezone`: IANA tz of service location
+
+### ServiceHours
+- `serviceId`: references a `Service`
+- `dayOfWeek`: 0=Monday … 6=Sunday
+- `start`: start time (HH:MM)
+- `end`: end time (HH:MM)
 
 ### Appointment
 - `id`: unique identifier
