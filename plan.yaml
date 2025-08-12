@@ -70,11 +70,11 @@ phases:
       - { id: P4-3, title: Agent DOM mode (?agent=1), owner: FE, status: done }
   - id: P5
     name: WordPress plugin
-    status: todo
+    status: done
     tasks:
-      - { id: P5-1, title: Plugin skeleton + settings, owner: WP, status: todo }
-      - { id: P5-2, title: Script + JSON-LD injection, owner: WP, status: todo }
-      - { id: P5-3, title: OAuth UI (Google/MS), owner: WP, status: todo }
+      - { id: P5-1, title: Plugin skeleton + settings, owner: WP, status: done }
+      - { id: P5-2, title: Script + JSON-LD injection, owner: WP, status: done }
+      - { id: P5-3, title: OAuth UI (Google/MS), owner: WP, status: done }
   - id: P6
     name: Agent adapters
     status: todo
