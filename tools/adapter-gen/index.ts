@@ -1,4 +1,3 @@
-#!/usr/bin/env ts-node
 import fs from 'fs';
 import path from 'path';
 
@@ -16,7 +15,7 @@ const src = path.join(process.cwd(), 'tools', 'adapter-gen', 'templates', 'wordp
 const dest = path.join(process.cwd(), 'platforms_out', 'wordpress-plugin');
 fs.mkdirSync(dest, { recursive: true });
 
-function copyDir(s,d){
+function copyDir(s: string, d: string): void {
   for (const entry of fs.readdirSync(s, { withFileTypes: true })) {
     const sp = path.join(s, entry.name);
     const dp = path.join(d, entry.name.replace('.tmpl',''));

@@ -80,6 +80,14 @@ phases:
     status: done
     tasks:
       - { id: P6-1, title: MCP tool server (list/create/cancel), owner: BE, status: done }
+  - id: P7
+    name: Testing Infrastructure & Bug Fixes
+    status: partial
+    tasks:
+      - { id: P7-1, title: WordPress Docker testing environment, owner: WP, status: done }
+      - { id: P7-2, title: Fix TypeScript adapter generator compilation, owner: BE, status: todo }
+      - { id: P7-3, title: Enable plugin volume mount in docker-compose, owner: WP, status: todo }
+      - { id: P7-4, title: End-to-end WordPress plugin testing, owner: WP, status: todo }
 definitions_of_done:
   mvp:
     - "WP plugin installs; script + JSON-LD present"

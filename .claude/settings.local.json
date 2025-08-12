@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm generate:adapter:*)",
+      "Bash(corepack enable)",
+      "Bash(corepack prepare:*)",
+      "Bash(pnpm:*)",
+      "Bash(sudo pnpm:*)",
+      "Bash(chmod:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker:*)",
+      "Bash(timeout 30s docker compose -f docker-compose.test.yml pull)",
+      "Bash(alias docker=\"/mnt/c/Program\\ Files/Docker/Docker/resources/bin/docker.exe\")",
+      "Bash(alias docker-compose=\"/mnt/c/Program\\ Files/Docker/Docker/resources/bin/docker-compose.exe\")",
+      "Bash(/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe run --rm hello-world)",
+      "Bash(/mnt/c/Program Files/Docker/Docker/resources/bin/docker-compose.exe -f docker-compose.test.yml up -d)",
+      "Bash(/mnt/c/Program Files/Docker/Docker/resources/bin/docker-compose.exe -f docker-compose.test.yml ps)",
+      "Bash(/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe images)",
+      "Bash(/mnt/c/Program Files/Docker/Docker/resources/bin/docker-compose.exe -f docker-compose.test.yml pull)",
+      "Bash(/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe pull mysql:8.0)",
+      "Bash(/mnt/c/Program Files/Docker/Docker/resources/bin/docker-compose.exe -f docker-compose.test.yml restart wordpress)",
+      "Bash(/mnt/c/Program Files/Docker/Docker/resources/bin/docker-compose.exe -f docker-compose.test.yml exec wordpress ls -la /var/www/html/wp-content/plugins/)",
+      "Bash(/mnt/c/Program Files/Docker/Docker/resources/bin/docker-compose.exe -f docker-compose.test.yml down)",
+      "Bash(/mnt/c/Program Files/Docker/Docker/resources/bin/docker-compose.exe -f docker-compose.test.yml exec wordpress ls -la /var/www/html/wp-content/plugins/ai-smb-booker/)",
+      "Bash(/mnt/c/Program Files/Docker/Docker/resources/bin/docker-compose.exe -f docker-compose.test.yml exec wordpress cat /var/www/html/wp-content/plugins/ai-smb-booker/plugin.php)",
+      "Bash(/mnt/c/Program Files/Docker/Docker/resources/bin/docker-compose.exe -f docker-compose.test.yml exec wordpress ls -la /var/www/html/wp-content/plugins/ai-smb-booker/includes/)",
+      "Bash(mkdir:*)",
+      "Bash(mv:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

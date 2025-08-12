@@ -12,8 +12,9 @@
     "generate:adapter": "ts-node tools/adapter-gen/index.ts --manifest"
   },
   "devDependencies": {
+    "@types/node": "^24.2.1",
     "ts-node": "^10.9.2",
-    "typescript": "^5.5.4",
-    "turbo": "^2.0.4"
+    "turbo": "^2.0.4",
+    "typescript": "^5.5.4"
   }
 }
