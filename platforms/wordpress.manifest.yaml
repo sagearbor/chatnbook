@@ -1,2 +1,24 @@
 platform: wordpress
 language: php
+
+plugin:
+  slug: ai-smb-booker
+  name: AI SMB Booker
+  version: 0.1.0
+  description: Injects booking widget and JSON-LD and handles OAuth setup.
+  author: Chatnbook Team
+  php: ">=7.4"
+
+injection:
+  script_url: https://cdn.example.com/widget.js
+  jsonld:
+    "@context": https://schema.org
+    "@type": LocalBusiness
+    potentialAction:
+      "@type": ScheduleAction
+      target:
+        "@type": EntryPoint
+        urlTemplate: https://api.example.com/v1/appointments
+        httpMethod: POST
+        encodingType: application/json
+      instrument: https://api.example.com/openapi.json
