@@ -6,3 +6,6 @@ build
 coverage
 pnpm-lock.yaml
 /packages/connectors-py/.venv/
+__pycache__/
+*.pyc
+package-lock.json
