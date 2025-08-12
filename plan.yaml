@@ -63,7 +63,7 @@ phases:
       - { id: P3-3, title: Well-known endpoints, owner: BE, status: done }
   - id: P4
     name: Widget (human + agent-friendly)
-    status: todo
+    status: done
     tasks:
       - { id: P4-1, title: Loader script (async + CSP), owner: FE, status: done }
       - { id: P4-2, title: Chat + booking UI, owner: FE, status: done }
@@ -77,9 +77,9 @@ phases:
       - { id: P5-3, title: OAuth UI (Google/MS), owner: WP, status: done }
   - id: P6
     name: Agent adapters
-    status: todo
+    status: done
     tasks:
-      - { id: P6-1, title: MCP tool server (list/create/cancel), owner: BE, status: todo }
+      - { id: P6-1, title: MCP tool server (list/create/cancel), owner: BE, status: done }
 definitions_of_done:
   mvp:
     - "WP plugin installs; script + JSON-LD present"
