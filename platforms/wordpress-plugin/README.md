@@ -60,7 +60,13 @@ source ~/.bashrc
    - Login to admin at http://localhost:8080/wp-admin
    - Navigate to Plugins → Installed Plugins
    - Activate "AI SMB Booker" plugin
-   - Configure the plugin in Settings → AI SMB Booker
+
+5. **Load Test Pages (Automatic Setup):**
+   ```bash
+   # After WordPress is installed and running
+   ./setup-test-data.sh
+   ```
+   This creates 7 sample business pages for testing plugin functionality.
 
 ## Development Workflow
 
