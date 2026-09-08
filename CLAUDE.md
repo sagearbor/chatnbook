@@ -53,6 +53,10 @@ pnpm --filter @smb/api test     # node --test test/*.test.js
 pnpm --filter @smb/adapters-mcp test
 pnpm --filter @smb/widget test
 
+# Or run everything the way CI/merge verification does (needs the Python
+# venv active and infra/docker-compose.dev.yml migrated as above first):
+pnpm test
+
 # WordPress plugin testing
 cd platforms/wordpress-plugin
 docker compose -f docker-compose.test.yml up -d  # Start WordPress + MySQL
