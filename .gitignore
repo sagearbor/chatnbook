@@ -10,3 +10,4 @@ __pycache__/
 *.pyc
 package-lock.json
 platforms_out/*.zip
+tmp/
