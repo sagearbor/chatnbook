@@ -8,6 +8,14 @@ import { getWellKnownDocument } from '../../discovery/well_known.js';
 import type { AppointmentRecord, AppointmentsRepository } from './repositories/appointments-repo.js';
 import { InMemoryAppointmentsRepository } from './repositories/memory-appointments-repo.js';
 import { PgAppointmentsRepository } from './repositories/pg-appointments-repo.js';
+import type { OAuthTokensRepository } from './repositories/oauth-tokens-repo.js';
+import { InMemoryOAuthTokensRepository } from './repositories/memory-oauth-tokens-repo.js';
+import { PgOAuthTokensRepository } from './repositories/pg-oauth-tokens-repo.js';
+import { createOAuthRouter, getValidAccessToken, CalendarNotConnectedError } from './oauth/routes.js';
+import { isOAuthProvider } from './oauth/providers.js';
+import type { CalendarConnector } from './connectors/calendar-connector.js';
+import { ConnectorError } from './connectors/calendar-connector.js';
+import { PythonCalendarConnector } from './connectors/python-calendar-connector.js';
 
 export const app = express();
 app.use(cors());
@@ -20,6 +28,33 @@ app.use(express.json());
 const appointmentsRepo: AppointmentsRepository = process.env.DATABASE_URL
   ? new PgAppointmentsRepository(process.env.DATABASE_URL)
   : new InMemoryAppointmentsRepository();
+
+// Same pattern for OAuth calendar tokens (migrations/002_create_oauth_tokens.sql).
+const oauthTokensRepo: OAuthTokensRepository = process.env.DATABASE_URL
+  ? new PgOAuthTokensRepository(process.env.DATABASE_URL)
+  : new InMemoryOAuthTokensRepository();
+
+app.use(createOAuthRouter(oauthTokensRepo));
+
+// Calls the Python connectors (packages/connectors-py) for calendar
+// availability + event creation. Production default shells out to python;
+// API tests inject a fake via setCalendarConnectorForTest so they never
+// spawn a subprocess. The one real integration test
+// (test/appointments-connector-integration.test.js) intentionally leaves
+// this as the real PythonCalendarConnector.
+let calendarConnector: CalendarConnector = new PythonCalendarConnector();
+
+/** Test-only: swaps the calendar connector implementation. */
+export function setCalendarConnectorForTest(connector: CalendarConnector) {
+  calendarConnector = connector;
+}
+
+/** Test-only: direct access to the OAuth tokens repository, so tests can
+ * inspect what's actually stored (e.g. assert it's encrypted, not
+ * plaintext) or seed an expired token to exercise refresh handling. */
+export function getOAuthTokensRepoForTest(): OAuthTokensRepository {
+  return oauthTokensRepo;
+}
 
 function toAppointmentResponse(record: AppointmentRecord) {
   return {
@@ -63,9 +98,15 @@ export async function resetIdempotency() {
   await appointmentsRepo.reset();
 }
 
+/** Test helper: clears persisted OAuth token state (Postgres or in-memory). */
+export async function resetOAuthTokens() {
+  await oauthTokensRepo.reset();
+}
+
 /** Test helper: closes the underlying DB pool / connections. */
 export async function closeRepositories() {
   await appointmentsRepo.close();
+  await oauthTokensRepo.close();
 }
 
 function verifyHmac(req: express.Request, res: express.Response, next: express.NextFunction) {
@@ -97,23 +138,130 @@ app.get(['/openapi.json', '/.well-known/openapi.json'], (_req, res) => {
   res.type('application/json').send(spec);
 });
 
-// Still stubs -- not part of this task's scope (see docs/REALITY-CHECK.md).
+// /v1/services stays a stub -- out of scope for this task (no services
+// table exists yet; see docs/REALITY-CHECK.md).
 app.get('/v1/services', (_req, res) => res.json({ services: [] }));
-app.get('/v1/availability', (_req, res) => res.json({ slots: [] }));
+
+// Real calendar availability when accountId/provider/calendarId are given
+// (queries the connected calendar via the Python connectors and computes
+// free slots); falls back to the historical `{ slots: [] }` stub when
+// they're not, so existing callers (e.g. packages/adapters/mcp, which
+// today only sends serviceId/start/end/tz) keep working unchanged.
+app.get('/v1/availability', async (req, res) => {
+  const { accountId, provider, calendarId, start, end } = req.query;
+  const slotMinutes = Number(req.query.slotMinutes) || 30;
+  if (!accountId || !provider || !calendarId || !start || !end) {
+    return res.json({ slots: [] });
+  }
+  if (typeof provider !== 'string' || !isOAuthProvider(provider)) {
+    return res.status(400).json({ error: `unsupported provider: ${provider}` });
+  }
+  if (typeof start !== 'string' || typeof end !== 'string' || typeof calendarId !== 'string') {
+    return res.status(400).json({ error: 'accountId, calendarId, start, and end must be strings' });
+  }
+  try {
+    const token = await getValidAccessToken(oauthTokensRepo, String(accountId), provider);
+    const busy = await calendarConnector.getBusy({ provider, token, calendarId, start, end });
+    const slots = await calendarConnector.computeAvailability({ start, end, busy, slotMinutes });
+    res.json({ slots });
+  } catch (err) {
+    if (err instanceof CalendarNotConnectedError) {
+      return res.status(400).json({ error: err.message });
+    }
+    if (err instanceof ConnectorError) {
+      console.error('calendar connector error computing availability', err);
+      return res.status(502).json({ error: 'Failed to reach calendar provider' });
+    }
+    console.error('failed to compute availability', err);
+    res.status(500).json({ error: 'Failed to compute availability' });
+  }
+});
 
 app.post('/v1/appointments', verifyHmac, async (req, res) => {
   const key = req.header('Idempotency-Key');
   if (!key) {
     return res.status(400).json({ error: 'Idempotency-Key required' });
   }
-  const { accountId, serviceId, startTime, customer } = req.body || {};
+  const { accountId, serviceId, startTime, customer, provider, calendarId, durationMinutes } =
+    req.body || {};
   if (!accountId || !serviceId || !startTime || !customer?.name || !customer?.email) {
     return res.status(400).json({
       error: 'accountId, serviceId, startTime, and customer.name/customer.email are required',
     });
   }
+  if (provider !== undefined && !isOAuthProvider(provider)) {
+    return res.status(400).json({ error: `unsupported provider: ${provider}` });
+  }
+  if (provider && !calendarId) {
+    return res.status(400).json({ error: 'calendarId is required when provider is set' });
+  }
 
   try {
+    // Idempotency replay check happens *before* any calendar work, so a
+    // retried request never creates a second real calendar event. (Two
+    // concurrent *first* requests with the same key can each pass this
+    // check and both call the calendar connector -- the DB's unique
+    // constraint on idempotency_key still prevents a duplicate DB row,
+    // but a stray duplicate calendar event is possible in that race. Not
+    // addressed here; would need a short-lived claim/lock to close.)
+    const existing = await appointmentsRepo.getByIdempotencyKey(key);
+    if (existing) {
+      return res.status(200).json(toAppointmentResponse(existing));
+    }
+
+    let providerEventId: string | undefined;
+    if (provider) {
+      let token: string;
+      try {
+        token = await getValidAccessToken(oauthTokensRepo, accountId, provider);
+      } catch (err) {
+        return res.status(400).json({ error: (err as Error).message });
+      }
+      const duration = Number(durationMinutes) > 0 ? Number(durationMinutes) : 30;
+      const startDate = new Date(startTime);
+      if (Number.isNaN(startDate.getTime())) {
+        return res.status(400).json({ error: 'startTime must be a valid ISO-8601 date-time' });
+      }
+      const endDate = new Date(startDate.getTime() + duration * 60_000);
+      const startIso = startDate.toISOString();
+      const endIso = endDate.toISOString();
+
+      let busy;
+      try {
+        busy = await calendarConnector.getBusy({
+          provider,
+          token,
+          calendarId,
+          start: startIso,
+          end: endIso,
+        });
+      } catch (err) {
+        console.error('calendar connector error checking availability', err);
+        return res.status(502).json({ error: 'Failed to reach calendar provider' });
+      }
+      const conflict = busy.some(
+        (b) => new Date(b.start).getTime() < endDate.getTime() && new Date(b.end).getTime() > startDate.getTime()
+      );
+      if (conflict) {
+        return res.status(409).json({ error: 'requested time is not available' });
+      }
+
+      try {
+        const createdEvent = await calendarConnector.createEvent({
+          provider,
+          token,
+          calendarId,
+          start: startIso,
+          end: endIso,
+          summary: `${serviceId} - ${customer.name}`,
+        });
+        providerEventId = createdEvent.eventId;
+      } catch (err) {
+        console.error('calendar connector error creating event', err);
+        return res.status(502).json({ error: 'Failed to create calendar event' });
+      }
+    }
+
     const { record, created } = await appointmentsRepo.createIdempotent({
       idempotencyKey: key,
       accountId,
@@ -123,6 +271,7 @@ app.post('/v1/appointments', verifyHmac, async (req, res) => {
       notes: req.body?.notes,
       source: req.body?.source,
       metadata: req.body?.metadata,
+      providerEventId,
     });
     if (created) {
       sendNotification({

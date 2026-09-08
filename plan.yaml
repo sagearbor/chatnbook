@@ -33,6 +33,25 @@ meta:
        <script> tag it's actually loaded as. /v1/services and /v1/availability
        are still stubs; still no OAuth flow. See docs/REALITY-CHECK.md's update
        note and the newest tmp/wrapups/*.yaml."
+    - "2026-09-08 later still: real OAuth authorization-code flow for Google and
+       Microsoft now exists (GET /oauth/:provider/start + /callback), with
+       tokens encrypted at rest (AES-256-GCM, TOKEN_ENCRYPTION_KEY) in a new
+       oauth_tokens Postgres table and transparent refresh handling, tested
+       end to end against a local mock OAuth provider (no real client ids
+       needed). POST /v1/appointments and GET /v1/availability are now wired
+       to the Python connectors (packages/connectors-py) via a JSON-over-stdio
+       CLI bridge (connectors/cli.py) -- appointment creation checks calendar
+       availability (409 on conflict) and creates a real calendar event,
+       storing provider_event_id; availability computes real free slots.
+       Both stay fully backward compatible when no `provider` is given (the
+       historical in-memory/DB-only / `{slots:[]}` behavior, since existing
+       callers like packages/adapters/mcp don't send one). Tested with a
+       mocked connector (packages/api/test/appointments-connector.test.js)
+       plus one real integration test running the actual python connector
+       against a fake calendar HTTP backend
+       (appointments-connector-integration.test.js). /v1/services remains a
+       stub (no services table); ICS confirm-workflow still doesn't exist.
+       See the newest tmp/wrapups/*.yaml."
 architecture:
   components:
     - { id: api, desc: Booking API + availability + OpenAPI }
@@ -65,8 +84,8 @@ phases:
     name: Calendar Connectors
     status: partial
     tasks:
-      - { id: P2-1, title: Google OAuth read/write, owner: BE, status: partial, note: "Calendar API read/write calls exist and are unit-tested (see connectors-py tests), but there is no OAuth authorization-code flow anywhere in the repo -- functions take a pre-obtained bearer token as an argument. GOOGLE_CLIENT_ID/SECRET in .env.example are unused." }
-      - { id: P2-2, title: Microsoft Graph read/write, owner: BE, status: partial, note: "Same gap as P2-1: Graph API calls implemented and tested, but no OAuth flow to obtain the token. MS_CLIENT_ID/SECRET in .env.example are unused." }
+      - { id: P2-1, title: Google OAuth read/write, owner: BE, status: done, note: "Real authorization-code flow: GET /oauth/google/start + /oauth/google/callback (packages/api/src/oauth/routes.ts), token exchange/refresh via packages/api/src/oauth/oauth-client.ts, encrypted storage in Postgres (oauth_tokens table). POST /v1/appointments and GET /v1/availability use the stored token via getValidAccessToken() and call the connector for real busy-check + event creation. Verified against a local mock OAuth provider (packages/api/test/oauth-flow.test.js) and a fake Google Calendar HTTP backend driving the real python connector (appointments-connector-integration.test.js) -- no real Google credentials used." }
+      - { id: P2-2, title: Microsoft Graph read/write, owner: BE, status: partial, note: "Same OAuth flow/token storage/refresh as P2-1 works for microsoft too (packages/api/src/oauth/providers.ts covers both providers identically) and is exercised by the same test suite for the OAuth mechanics, but the connector-wiring integration test (appointments-connector-integration.test.js) only drives the google.py path end to end -- microsoft.py's create_event/get_busy are still only unit-tested (test_ms_connector.py), not exercised via the TS API + fake backend. Downgrade from P2-1's 'done' to 'partial' until that integration coverage exists too." }
       - { id: P2-3, title: ICS read-only + confirm workflow, owner: BE, status: partial, note: "ICS parsing/busy-block merge is implemented and tested (test_ics_busy.py, test_merge_busy_*.py). No 'confirm workflow' exists anywhere in the codebase." }
   - id: P3
     name: Discovery Layer

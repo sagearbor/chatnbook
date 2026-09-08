@@ -38,6 +38,10 @@ export interface CreateAppointmentInput {
   notes?: string;
   source?: string;
   metadata?: Record<string, unknown>;
+  /** Set when a real calendar event was created for this booking (see
+   * ../connectors/calendar-connector.ts and index.ts's /v1/appointments
+   * handler) -- stored on the same INSERT as the appointment row. */
+  providerEventId?: string;
 }
 
 export interface AppointmentsRepository {
@@ -50,6 +54,10 @@ export interface AppointmentsRepository {
     input: CreateAppointmentInput
   ): Promise<{ record: AppointmentRecord; created: boolean }>;
   getById(id: string): Promise<AppointmentRecord | null>;
+  /** Looks up a previously-created appointment by its Idempotency-Key,
+   * without creating anything. Used to detect a retry *before* doing any
+   * (expensive, side-effecting) calendar work in index.ts. */
+  getByIdempotencyKey(idempotencyKey: string): Promise<AppointmentRecord | null>;
   cancel(id: string): Promise<AppointmentRecord | null>;
   reschedule(id: string, newStartTime: string): Promise<AppointmentRecord | null>;
   /** Test-only: clears all data. */
