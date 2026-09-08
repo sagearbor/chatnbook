@@ -39,7 +39,7 @@ export class InMemoryAppointmentsRepository implements AppointmentsRepository {
       notes: input.notes ?? null,
       source: input.source ?? null,
       metadata: input.metadata ?? null,
-      providerEventId: null,
+      providerEventId: input.providerEventId ?? null,
       createdAt: now,
       updatedAt: now,
     };
@@ -50,6 +50,11 @@ export class InMemoryAppointmentsRepository implements AppointmentsRepository {
 
   async getById(id: string): Promise<AppointmentRecord | null> {
     return this.byId.get(id) ?? null;
+  }
+
+  async getByIdempotencyKey(idempotencyKey: string): Promise<AppointmentRecord | null> {
+    const id = this.byIdempotencyKey.get(idempotencyKey);
+    return id ? this.byId.get(id) ?? null : null;
   }
 
   async cancel(id: string): Promise<AppointmentRecord | null> {

@@ -22,6 +22,33 @@ install) so the results reflect what a new contributor would actually hit.
 > `/v1/availability` are still stubs, and nothing is deployed/hosted. See
 > the newest `tmp/wrapups/*.yaml` for the full verification commands.
 
+> **Update — 2026-09-08, next session:** the "no OAuth flow" and
+> "`/v1/availability`/appointments never call the connectors" gaps below
+> are now addressed. `GET /oauth/:provider/start` + `/callback` implement
+> a real authorization-code flow for Google and Microsoft, with tokens
+> encrypted at rest (AES-256-GCM, `TOKEN_ENCRYPTION_KEY`) in a new
+> `oauth_tokens` Postgres table and transparent refresh via
+> `getValidAccessToken()`. `POST /v1/appointments` (when `provider` is
+> set) and `GET /v1/availability` (when `accountId`/`provider`/`calendarId`
+> are set) now call the Python connectors through a JSON-over-stdio CLI
+> bridge (`packages/connectors-py/src/connectors/cli.py`, invoked by
+> `packages/api/src/connectors/python-calendar-connector.ts`) for real
+> busy-checking (409 on conflict) and event creation, storing
+> `provider_event_id`. Verified for real, not just "it compiles": a local
+> mock OAuth provider drives the entire redirect chain and a genuine
+> refresh-token exchange (`packages/api/test/oauth-flow.test.js`, no real
+> Google/Microsoft client ids used), and one integration test
+> (`appointments-connector-integration.test.js`) leaves the real
+> `PythonCalendarConnector` in place and points `google.py` at a fake
+> Google Calendar HTTP server, so it exercises the actual TS -> subprocess
+> -> Python -> HTTP path end to end. `pnpm test` (all suites) is green.
+> Both endpoints stay fully backward compatible when `provider` is
+> omitted (existing callers like `packages/adapters/mcp` don't send one).
+> `/v1/services` is still a stub (no services table); Microsoft's
+> equivalent connector path is only unit-tested, not integration-tested
+> the way Google's is (see `plan.yaml` P2-2); nothing is deployed/hosted.
+> See the newest `tmp/wrapups/*.yaml`.
+
 ## TL;DR
 
 - **The Python calendar-connector library and the WordPress plugin

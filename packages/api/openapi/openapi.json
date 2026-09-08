@@ -48,6 +48,7 @@
     "/v1/availability": {
       "get": {
         "summary": "Get availability",
+        "description": "Returns `{ slots: [] }` unless accountId, provider, calendarId, start, and end are all supplied, in which case it queries the connected calendar (via the Python connectors) for real busy intervals and computes free slots. accountId must have a provider calendar already connected via `/oauth/{provider}/start` + `/oauth/{provider}/callback`.\n",
         "parameters": [
           {
             "in": "query",
@@ -59,6 +60,24 @@
           {
             "in": "query",
             "name": "serviceId",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "google",
+                "microsoft"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "calendarId",
             "schema": {
               "type": "string"
             }
@@ -81,6 +100,14 @@
           },
           {
             "in": "query",
+            "name": "slotMinutes",
+            "schema": {
+              "type": "integer",
+              "default": 30
+            }
+          },
+          {
+            "in": "query",
             "name": "tz",
             "schema": {
               "type": "string"
@@ -98,14 +125,29 @@
                     "slots": {
                       "type": "array",
                       "items": {
-                        "type": "string",
-                        "format": "date-time"
+                        "type": "object",
+                        "properties": {
+                          "start": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "end": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
                       }
                     }
                   }
                 }
               }
             }
+          },
+          "400": {
+            "description": "Unsupported provider, or accountId has no calendar connected for provider"
+          },
+          "502": {
+            "description": "Failed to reach the calendar provider"
           }
         }
       }
@@ -139,6 +181,16 @@
           }
         },
         "responses": {
+          "200": {
+            "description": "Replayed an existing appointment for this Idempotency-Key (no new calendar event or DB row was created).\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppointmentResponse"
+                }
+              }
+            }
+          },
           "201": {
             "description": "Created",
             "content": {
@@ -148,6 +200,124 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "Validation error, unsupported provider, or accountId has no calendar connected for provider"
+          },
+          "409": {
+            "description": "Requested time conflicts with a busy interval on the connected calendar"
+          },
+          "502": {
+            "description": "Failed to reach the calendar provider"
+          }
+        }
+      }
+    },
+    "/oauth/{provider}/start": {
+      "get": {
+        "summary": "Begin the OAuth authorization-code flow for a calendar provider",
+        "description": "302-redirects the browser to the provider's consent screen.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "google",
+                "microsoft"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "accountId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the provider's authorization URL"
+          },
+          "400": {
+            "description": "Missing accountId"
+          },
+          "404": {
+            "description": "Unsupported provider"
+          }
+        }
+      }
+    },
+    "/oauth/{provider}/callback": {
+      "get": {
+        "summary": "OAuth callback -- exchanges the authorization code for tokens",
+        "description": "The provider redirects here with `code` and `state` after the user consents. Tokens are exchanged and stored encrypted (AES-256-GCM, key from TOKEN_ENCRYPTION_KEY) in Postgres, keyed by (accountId, provider).\n",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "google",
+                "microsoft"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Calendar connected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accountId": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "connected": {
+                      "type": "boolean"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing/invalid code or state"
+          },
+          "404": {
+            "description": "Unsupported provider"
+          },
+          "502": {
+            "description": "Token exchange with the provider failed"
           }
         }
       }
@@ -314,6 +484,21 @@
           "metadata": {
             "type": "object",
             "additionalProperties": true
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "google",
+              "microsoft"
+            ],
+            "description": "When set, the appointment is checked against and written to the connected calendar (accountId must already be connected via /oauth/{provider}/start). calendarId becomes required.\n"
+          },
+          "calendarId": {
+            "type": "string"
+          },
+          "durationMinutes": {
+            "type": "integer",
+            "default": 30
           }
         }
       },

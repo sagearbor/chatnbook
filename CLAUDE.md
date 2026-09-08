@@ -71,6 +71,58 @@ whenever `DATABASE_URL` is set -- the normal/production case) and
 Schema lives in `packages/api/migrations/*.sql`, applied via
 `pnpm --filter @smb/api db:migrate`.
 
+### OAuth calendar connect flow
+`GET /oauth/:provider/start?accountId=...` (provider is `google` or
+`microsoft`) 302-redirects to the provider's consent screen; the provider
+redirects back to `GET /oauth/:provider/callback`, which exchanges the
+code for tokens and stores them encrypted (AES-256-GCM, key from
+`TOKEN_ENCRYPTION_KEY`) in the `oauth_tokens` table (see
+`packages/api/migrations/002_create_oauth_tokens.sql`), one row per
+`(accountId, provider)`. Same Pg/in-memory-repository split as
+appointments (`packages/api/src/repositories/{oauth-tokens-repo,pg-oauth-tokens-repo,memory-oauth-tokens-repo}.ts`).
+`packages/api/src/oauth/routes.ts`'s `getValidAccessToken()` transparently
+refreshes an expired access token using the stored refresh token before
+handing it to a caller. State is a signed (HMAC, using
+`AGENT_HMAC_SECRET`), self-contained token -- no server-side session
+storage needed. Provider auth/token URLs default to the real
+Google/Microsoft endpoints but are overridable
+(`GOOGLE_OAUTH_AUTH_URL`/`GOOGLE_OAUTH_TOKEN_URL`, `MS_OAUTH_AUTH_URL`/`MS_OAUTH_TOKEN_URL`),
+which is how `packages/api/test/oauth-flow.test.js` points the whole flow
+at a local mock OAuth provider (`test/helpers/mock-oauth-provider.mjs`)
+instead of the real thing -- no real client ids/secrets needed to test it.
+
+### Calendar connector wiring (availability + event creation)
+`POST /v1/appointments` and `GET /v1/availability` call the Python
+connectors (`packages/connectors-py`) through `CalendarConnector`
+(`packages/api/src/connectors/calendar-connector.ts`). The production
+implementation, `PythonCalendarConnector`, shells out to
+`python -m connectors.cli` (`packages/connectors-py/src/connectors/cli.py`,
+a JSON-over-stdio bridge) rather than reimplementing Google/Microsoft
+calendar logic in TypeScript. Both endpoints are backward compatible: a
+request with no `provider` field behaves exactly as before (in-memory/
+Postgres only, no calendar call) -- required because
+`packages/adapters/mcp`'s existing calls don't send one.
+- `POST /v1/appointments` with `provider`/`calendarId` set: looks up the
+  account's stored OAuth token, calls the connector's `getBusy` to check
+  for conflicts (409 if the slot overlaps an existing busy interval), then
+  `createEvent` to create the real calendar event, storing the result as
+  `provider_event_id` on the appointment row. The idempotency-key replay
+  check happens *before* any of this, so retries never touch the
+  calendar.
+- `GET /v1/availability` with `accountId`/`provider`/`calendarId`/`start`/`end`
+  all set: calls `getBusy` then `computeAvailability` (wrapping
+  `packages/connectors-py/src/connectors/availability.py`) to return real
+  free slots; falls back to `{ slots: [] }` when they're not all given.
+- Tests: `packages/api/test/appointments-connector.test.js` injects a fake
+  `CalendarConnector` via `setCalendarConnectorForTest` (never spawns
+  python). `packages/api/test/appointments-connector-integration.test.js`
+  is the one real integration test -- it leaves the real
+  `PythonCalendarConnector` in place and points
+  `google.py`'s `GOOGLE_CALENDAR_API_BASE` at a fake Google Calendar HTTP
+  backend (`test/helpers/fake-calendar-backend.mjs`), so it's a genuine
+  end-to-end exercise of TS -> subprocess -> Python -> HTTP -> fake
+  Google API.
+
 ### Health Checks
 ```bash
 curl http://localhost:3000/health
@@ -110,6 +162,10 @@ The `tools/adapter-gen/` generates platform-specific wrappers from YAML manifest
 
 ## Configuration
 - Copy `.env.example` to `.env` and configure OAuth credentials, database URLs, HMAC secrets
+- `TOKEN_ENCRYPTION_KEY` (generate with `openssl rand -base64 32`) encrypts
+  OAuth calendar tokens at rest in Postgres -- required for the
+  `/oauth/:provider/*` routes and any `/v1/appointments`/`/v1/availability`
+  call that sets `provider`.
 - See `agents/agent_instructions.yaml` for comprehensive environment variable requirements
 - WordPress plugin handles OAuth setup UI for non-technical users
 

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from typing import List, Tuple
 
 import requests
 
-API_BASE = "https://www.googleapis.com/calendar/v3"
+# Overridable so tests (and self-hosted proxies) can point this at a fake
+# calendar backend instead of the real Google API. Defaults to the real
+# endpoint for normal operation.
+API_BASE = os.environ.get("GOOGLE_CALENDAR_API_BASE", "https://www.googleapis.com/calendar/v3")
 
 
 def get_busy(token: str, calendar_id: str, start: datetime, end: datetime) -> List[Tuple[datetime, datetime]]:

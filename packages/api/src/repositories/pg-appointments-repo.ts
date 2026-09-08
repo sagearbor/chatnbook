@@ -67,8 +67,8 @@ export class PgAppointmentsRepository implements AppointmentsRepository {
     const insertResult = await this.pool.query<AppointmentRow>(
       `INSERT INTO appointments
          (id, idempotency_key, account_id, service_id, start_time, status,
-          customer_name, customer_email, customer_phone, notes, source, metadata)
-       VALUES ($1, $2, $3, $4, $5, 'requested', $6, $7, $8, $9, $10, $11)
+          customer_name, customer_email, customer_phone, notes, source, metadata, provider_event_id)
+       VALUES ($1, $2, $3, $4, $5, 'requested', $6, $7, $8, $9, $10, $11, $12)
        ON CONFLICT (idempotency_key) DO NOTHING
        RETURNING *`,
       [
@@ -83,6 +83,7 @@ export class PgAppointmentsRepository implements AppointmentsRepository {
         input.notes ?? null,
         input.source ?? null,
         input.metadata ? JSON.stringify(input.metadata) : null,
+        input.providerEventId ?? null,
       ]
     );
 
@@ -104,6 +105,14 @@ export class PgAppointmentsRepository implements AppointmentsRepository {
     const result = await this.pool.query<AppointmentRow>(
       'SELECT * FROM appointments WHERE id = $1',
       [id]
+    );
+    return result.rows[0] ? toRecord(result.rows[0]) : null;
+  }
+
+  async getByIdempotencyKey(idempotencyKey: string): Promise<AppointmentRecord | null> {
+    const result = await this.pool.query<AppointmentRow>(
+      'SELECT * FROM appointments WHERE idempotency_key = $1',
+      [idempotencyKey]
     );
     return result.rows[0] ? toRecord(result.rows[0]) : null;
   }
