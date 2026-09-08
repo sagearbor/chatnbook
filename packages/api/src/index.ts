@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { sendNotification, extractContact } from './notify.js';
-import { wellKnown } from '../../discovery/well_known.js';
+import { getWellKnownDocument } from '../../discovery/well_known.js';
 
 export const app = express();
 app.use(cors());
@@ -60,7 +60,9 @@ function verifyHmac(req: express.Request, res: express.Response, next: express.N
   next();
 }
 
-app.use(wellKnown);
+app.get('/.well-known/ai-actions.json', (_req, res) => {
+  res.json(getWellKnownDocument());
+});
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
