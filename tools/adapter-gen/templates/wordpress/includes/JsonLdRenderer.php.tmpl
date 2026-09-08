@@ -2,22 +2,14 @@
 class JsonLdRenderer {
   public static function inject() {
     add_action('wp_head', function() {
-      $json = [
-        "@context" => "https://schema.org",
-        "@type" => "LocalBusiness",
+      $default_json = <<<'JSONLD'
+{{JSONLD_DEFAULT_JSON}}
+JSONLD;
+      $default = json_decode($default_json, true) ?: [];
+      $json = array_merge($default, [
         "name" => get_bloginfo('name'),
         "url" => get_bloginfo('url'),
-        "potentialAction" => [
-          "@type" => "ScheduleAction",
-          "target" => [
-            "@type" => "EntryPoint",
-            "urlTemplate" => "https://api.example.com/v1/appointments",
-            "httpMethod" => "POST",
-            "encodingType" => "application/json"
-          ],
-          "instrument" => "https://api.example.com/openapi.json"
-        ]
-      ];
+      ]);
       echo '<script type="application/ld+json">' . wp_json_encode($json) . '</script>';
     });
   }

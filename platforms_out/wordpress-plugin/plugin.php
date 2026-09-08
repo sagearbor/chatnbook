@@ -1,8 +1,11 @@
 <?php
 /*
 Plugin Name: AI SMB Booker
-Description: Injects booking widget + JSON-LD and handles OAuth setup.
+Description: Injects booking widget and JSON-LD and handles OAuth setup.
 Version: 0.1.0
+Author: Chatnbook Team
+Requires PHP: 7.4
+Text Domain: ai-smb-booker
 */
 
 if (!defined('ABSPATH')) exit;
