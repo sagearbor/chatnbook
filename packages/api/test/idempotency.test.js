@@ -14,7 +14,7 @@ function sign(body) {
 }
 
 test('returns same response for repeated Idempotency-Key', async (t) => {
-  resetIdempotency();
+  await resetIdempotency();
   const server = app.listen(0);
   t.after(() => server.close());
   const port = server.address().port;

@@ -14,6 +14,7 @@ corepack enable
 corepack prepare pnpm@9 --activate
 pnpm i
 docker compose -f infra/docker-compose.dev.yml up -d  # Postgres + Redis
+pnpm --filter @smb/api db:migrate  # DATABASE_URL=postgres://user:pass@localhost:5432/smb (matches the compose file)
 pnpm -r build
 
 # Python environment for connectors
@@ -42,11 +43,29 @@ pytest                          # Run all tests with testdox output (default)
 pytest -vv -rP                  # Verbose mode with detailed output
 pytest --durations=5            # Show slowest tests
 
+# TS API tests (unit tests use an in-memory repo; the Postgres
+# integration test needs the compose DB up and migrated first)
+docker compose -f infra/docker-compose.dev.yml up -d
+pnpm --filter @smb/api db:migrate
+pnpm --filter @smb/api test     # node --test test/*.test.js
+
+# MCP adapter + widget smoke tests
+pnpm --filter @smb/adapters-mcp test
+pnpm --filter @smb/widget test
+
 # WordPress plugin testing
 cd platforms/wordpress-plugin
 docker compose -f docker-compose.test.yml up -d  # Start WordPress + MySQL
 # Access: http://localhost:8080 (WordPress), http://localhost:8081 (PHPMyAdmin)
 ```
+
+### Appointment persistence
+`packages/api/src/repositories/` defines an `AppointmentsRepository` interface
+with two implementations: `PgAppointmentsRepository` (real Postgres, used
+whenever `DATABASE_URL` is set -- the normal/production case) and
+`InMemoryAppointmentsRepository` (a fast test double used when it isn't).
+Schema lives in `packages/api/migrations/*.sql`, applied via
+`pnpm --filter @smb/api db:migrate`.
 
 ### Health Checks
 ```bash
