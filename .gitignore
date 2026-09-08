@@ -9,3 +9,4 @@ pnpm-lock.yaml
 __pycache__/
 *.pyc
 package-lock.json
+platforms_out/*.zip
