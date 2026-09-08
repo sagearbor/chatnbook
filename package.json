@@ -11,7 +11,10 @@
     "dev": "turbo run dev --parallel",
     "generate:adapter": "ts-node tools/adapter-gen/index.ts",
     "package:wordpress": "node tools/adapter-gen/package.mjs",
-    "test:adapter-gen": "node --test tools/adapter-gen/test/*.test.mjs"
+    "test:adapter-gen": "node --test tools/adapter-gen/test/*.test.mjs",
+    "test:py": "pytest",
+    "test:ts": "pnpm -r build && pnpm -r test",
+    "test": "pnpm run test:py && pnpm run test:ts && pnpm run test:adapter-gen"
   },
   "devDependencies": {
     "@types/node": "^24.2.1",

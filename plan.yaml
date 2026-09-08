@@ -25,6 +25,14 @@ meta:
        /v1/availability endpoints return hardcoded empty responses; /v1/appointments
        only writes to an in-memory Map. Full findings, exact commands, and output:
        docs/REALITY-CHECK.md."
+    - "2026-09-08 later session: `pnpm -r build` now passes (discovery no longer
+       needs express). /v1/appointments (+ cancel/reschedule) now read/write real
+       Postgres (in-memory kept as a test double). packages/adapters/mcp and
+       packages/widget went from zero tests to smoke tests -- the widget one found
+       and fixed a real bug where dist/loader.js couldn't run as the classic
+       <script> tag it's actually loaded as. /v1/services and /v1/availability
+       are still stubs; still no OAuth flow. See docs/REALITY-CHECK.md's update
+       note and the newest tmp/wrapups/*.yaml."
 architecture:
   components:
     - { id: api, desc: Booking API + availability + OpenAPI }
@@ -51,7 +59,7 @@ phases:
     tasks:
       - { id: P1-1, title: Repo bootstrap + healthcheck, owner: BE, status: done }
       - { id: P1-2, title: Availability engine + DST tests, owner: BE, status: done }
-      - { id: P1-3, title: Booking engine idempotent, owner: BE, status: partial, note: "Idempotency is a real in-memory Map (tested), but nothing is persisted -- restart loses all bookings; Postgres/Redis are provisioned but unused. See docs/REALITY-CHECK.md." }
+      - { id: P1-3, title: Booking engine idempotent, owner: BE, status: done, note: "Appointments now persist to Postgres (packages/api/src/repositories/pg-appointments-repo.ts, migrations/001_create_appointments.sql); idempotency is a unique constraint on idempotency_key, not an in-process Map, so it's correct across restarts. In-memory repo kept as a fast test double. Redis is still provisioned but unused -- not needed by anything implemented so far. Verified against the real compose Postgres, see docs/REALITY-CHECK.md's update note and the newest tmp/wrapups/*.yaml." }
       - { id: P1-4, title: Notification service, owner: BE, status: done }
   - id: P2
     name: Calendar Connectors
