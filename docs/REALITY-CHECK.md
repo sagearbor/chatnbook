@@ -5,6 +5,23 @@ end, as opposed to what `plan.yaml` claims. Every command below was run
 against a clean local environment (macOS, Node v26, no prior Docker
 install) so the results reflect what a new contributor would actually hit.
 
+> **Update — 2026-09-08, later session:** the three items this doc flagged
+> as gaps in the TL;DR and "Bottom line" table below have been addressed:
+> `pnpm -r build` now exits 0 (packages/discovery/well_known.ts no longer
+> depends on express -- see `fix/build-and-persistence` branch/PR); the
+> appointment endpoints (`POST /v1/appointments`, `/cancel`, `/reschedule`)
+> now read/write real Postgres via `packages/api/src/repositories/` and
+> `packages/api/migrations/`, verified against the actual compose Postgres
+> (the in-memory repo is kept as a fast test double, selected automatically
+> when `DATABASE_URL` isn't set); and `packages/adapters/mcp` and
+> `packages/widget` each went from zero tests to real smoke tests (the
+> widget one caught and fixed a genuine shipped bug -- `dist/loader.js` had
+> a trailing ESM `export {}` that would SyntaxError as the classic
+> `<script>` tag it's actually loaded as on customer sites). Still
+> unaddressed, as before: no OAuth flow, `/v1/services` and
+> `/v1/availability` are still stubs, and nothing is deployed/hosted. See
+> the newest `tmp/wrapups/*.yaml` for the full verification commands.
+
 ## TL;DR
 
 - **The Python calendar-connector library and the WordPress plugin
