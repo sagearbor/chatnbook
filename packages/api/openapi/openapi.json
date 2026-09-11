@@ -47,12 +47,78 @@
             "description": "accountId query parameter is missing"
           }
         }
+      },
+      "post": {
+        "summary": "Create a service (admin)",
+        "description": "Operator endpoint, guarded by a shared admin key (`X-Admin-Key` must equal the ADMIN_API_KEY environment variable) rather than the agent HMAC. When ADMIN_API_KEY is unset the endpoint is not available at all and answers 503, which is deliberately distinguishable from a wrong key (401).\n",
+        "security": [
+          {
+            "adminKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "accountId",
+                  "name",
+                  "durationMinutes"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "Optional. Lets an operator seed a stable, known id; one is generated when omitted.\n"
+                  },
+                  "accountId": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "durationMinutes": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "bufferMinutes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Service"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Missing or incorrect X-Admin-Key"
+          },
+          "503": {
+            "description": "ADMIN_API_KEY is not configured on this instance"
+          }
+        }
       }
     },
     "/v1/availability": {
       "get": {
         "summary": "Get availability",
-        "description": "Returns `{ slots: [] }` unless accountId, provider, calendarId, start, and end are all supplied, in which case it queries the connected calendar (via the Python connectors) for real busy intervals and computes free slots. accountId must have a provider calendar already connected via `/oauth/{provider}/start` + `/oauth/{provider}/callback`. When serviceId is also supplied, it must name a real service (see GET /v1/services) belonging to accountId (404/400 otherwise), and its durationMinutes + bufferMinutes -- not slotMinutes -- determine the slot length.\n",
+        "description": "Returns `{ slots: [] }` unless at least accountId, start and end are supplied.\n\nWith `provider` and `calendarId` set as well, it queries the connected calendar (via the Python connectors) for real busy intervals and computes free slots; accountId must have that provider's calendar already connected via `/oauth/{provider}/start` + `/oauth/{provider}/callback`.\n\nWithout `provider`, it falls back to the instance's configured business hours (BUSINESS_HOURS, default \"Mon-Fri 09:00-17:00\", interpreted in BUSINESS_TZ, default \"America/New_York\") minus the account's existing non-canceled appointments. Slots never start in the past.\n\nWhen serviceId is supplied it must name a real service (see GET /v1/services) belonging to accountId (404/400 otherwise), and its durationMinutes + bufferMinutes -- not slotMinutes -- determine the slot length, on either path.\n",
         "parameters": [
           {
             "in": "query",
@@ -209,10 +275,70 @@
             "description": "Validation error, unsupported provider, or accountId has no calendar connected for provider"
           },
           "409": {
-            "description": "Requested time conflicts with a busy interval on the connected calendar"
+            "description": "The requested window overlaps an existing non-canceled appointment for this account (`slot no longer available`), or a busy interval on the connected calendar.\n"
           },
           "502": {
             "description": "Failed to reach the calendar provider"
+          }
+        }
+      }
+    },
+    "/v1/public/appointments": {
+      "post": {
+        "summary": "Create appointment (public / browser)",
+        "description": "Unauthenticated booking endpoint for the embeddable browser widget. A page running on a customer's site can't hold the agent HMAC secret, so no X-Signature is required here; the per-IP rate limiter applies instead.\n\n`Idempotency-Key` is optional (one is generated server-side when absent); supplying one gives the same replay semantics as the signed route. `provider`, `calendarId` and `durationMinutes` in the body are ignored -- the appointment's length always comes from the named service, which must exist and belong to accountId.\n",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicAppointmentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replayed an existing appointment for this Idempotency-Key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppointmentResponse"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppointmentResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "404": {
+            "description": "Unknown serviceId, or a serviceId that doesn't belong to accountId"
+          },
+          "409": {
+            "description": "The requested window overlaps an existing non-canceled appointment for this account (`slot no longer available`).\n"
+          },
+          "429": {
+            "description": "Rate limit exceeded"
           }
         }
       }
@@ -413,6 +539,11 @@
         "type": "apiKey",
         "in": "header",
         "name": "X-Signature"
+      },
+      "adminKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Admin-Key"
       }
     },
     "schemas": {
@@ -502,7 +633,51 @@
           },
           "durationMinutes": {
             "type": "integer",
-            "default": 30
+            "default": 30,
+            "description": "Fallback only, kept for packages/adapters/mcp: used when serviceId doesn't name a real service. When the service exists, its own durationMinutes wins.\n"
+          }
+        }
+      },
+      "PublicAppointmentRequest": {
+        "type": "object",
+        "required": [
+          "accountId",
+          "serviceId",
+          "startTime",
+          "customer"
+        ],
+        "properties": {
+          "accountId": {
+            "type": "string"
+          },
+          "serviceId": {
+            "type": "string"
+          },
+          "startTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "customer": {
+            "type": "object",
+            "required": [
+              "name",
+              "email"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string",
+                "format": "email"
+              },
+              "phone": {
+                "type": "string"
+              }
+            }
+          },
+          "notes": {
+            "type": "string"
           }
         }
       },

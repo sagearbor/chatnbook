@@ -5,6 +5,11 @@ import type {
   CreateAppointmentInput,
 } from './appointments-repo.js';
 
+/** Assumed length of an appointment whose endTime was never persisted --
+ * matches the Postgres implementation's fallback when the row's service
+ * is gone. */
+const DEFAULT_DURATION_MINUTES = 30;
+
 /**
  * In-memory test double for AppointmentsRepository. Mirrors the Postgres
  * implementation's idempotency and not-found semantics so tests written
@@ -32,7 +37,7 @@ export class InMemoryAppointmentsRepository implements AppointmentsRepository {
       accountId: input.accountId,
       serviceId: input.serviceId,
       startTime: input.startTime,
-      endTime: null,
+      endTime: input.endTime ?? null,
       status: 'requested',
       customerName: input.customer.name,
       customerEmail: input.customer.email,
@@ -75,14 +80,47 @@ export class InMemoryAppointmentsRepository implements AppointmentsRepository {
   async reschedule(id: string, newStartTime: string): Promise<AppointmentRecord | null> {
     const existing = this.byId.get(id);
     if (!existing) return null;
+    // Keep the appointment's duration: shift endTime by the same delta, so
+    // a rescheduled row doesn't carry a stale endTime into the overlap
+    // check (mirrors the Postgres implementation).
+    const durationMs = existing.endTime
+      ? new Date(existing.endTime).getTime() - new Date(existing.startTime).getTime()
+      : null;
     const updated: AppointmentRecord = {
       ...existing,
       startTime: newStartTime,
+      endTime:
+        durationMs === null
+          ? null
+          : new Date(new Date(newStartTime).getTime() + durationMs).toISOString(),
       status: 'confirmed',
       updatedAt: new Date().toISOString(),
     };
     this.byId.set(id, updated);
     return updated;
+  }
+
+  async listByAccountInRange(
+    accountId: string,
+    start: string,
+    end: string
+  ): Promise<AppointmentRecord[]> {
+    const rangeStart = new Date(start).getTime();
+    const rangeEnd = new Date(end).getTime();
+    return [...this.byId.values()]
+      .filter((a) => a.accountId === accountId && a.status !== 'canceled')
+      .filter((a) => {
+        const aStart = new Date(a.startTime).getTime();
+        // Mirrors the Pg implementation's COALESCE on end_time. Every row
+        // this repository writes now carries an endTime (the booking
+        // handler computes it from the service's duration), so the
+        // fallback only matters for rows seeded directly by a test.
+        const aEnd = a.endTime
+          ? new Date(a.endTime).getTime()
+          : aStart + DEFAULT_DURATION_MINUTES * 60_000;
+        return aStart < rangeEnd && aEnd > rangeStart;
+      })
+      .sort((a, b) => a.startTime.localeCompare(b.startTime));
   }
 
   async tryClaim(idempotencyKey: string): Promise<boolean> {

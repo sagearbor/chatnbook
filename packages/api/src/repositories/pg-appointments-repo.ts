@@ -70,10 +70,10 @@ export class PgAppointmentsRepository implements AppointmentsRepository {
     const id = crypto.randomUUID();
     const insertResult = await this.pool.query<AppointmentRow>(
       `INSERT INTO appointments
-         (id, idempotency_key, account_id, service_id, start_time, status,
+         (id, idempotency_key, account_id, service_id, start_time, end_time, status,
           customer_name, customer_email, customer_phone, notes, source, metadata,
           provider_event_id, provider, calendar_id)
-       VALUES ($1, $2, $3, $4, $5, 'requested', $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       VALUES ($1, $2, $3, $4, $5, $6, 'requested', $7, $8, $9, $10, $11, $12, $13, $14, $15)
        ON CONFLICT (idempotency_key) DO NOTHING
        RETURNING *`,
       [
@@ -82,6 +82,7 @@ export class PgAppointmentsRepository implements AppointmentsRepository {
         input.accountId,
         input.serviceId,
         input.startTime,
+        input.endTime ?? null,
         input.customer.name,
         input.customer.email,
         input.customer.phone ?? null,
@@ -136,12 +137,49 @@ export class PgAppointmentsRepository implements AppointmentsRepository {
 
   async reschedule(id: string, newStartTime: string): Promise<AppointmentRecord | null> {
     const result = await this.pool.query<AppointmentRow>(
-      `UPDATE appointments SET start_time = $2, status = 'confirmed', updated_at = now()
-       WHERE id = $1
+      // end_time shifts with start_time so the appointment keeps its
+      // duration -- otherwise a rescheduled row would carry a stale
+      // end_time and listByAccountInRange would misjudge overlaps.
+      `UPDATE appointments
+          SET start_time = $2,
+              end_time = CASE
+                WHEN end_time IS NULL THEN NULL
+                ELSE $2::timestamptz + (end_time - start_time)
+              END,
+              status = 'confirmed',
+              updated_at = now()
+        WHERE id = $1
        RETURNING *`,
       [id, newStartTime]
     );
     return result.rows[0] ? toRecord(result.rows[0]) : null;
+  }
+
+  async listByAccountInRange(
+    accountId: string,
+    start: string,
+    end: string
+  ): Promise<AppointmentRecord[]> {
+    // No new migration needed: start_time/end_time already exist. end_time
+    // can be null on rows written before the booking handler started
+    // persisting it, so fall back to the row's service duration (LEFT JOIN
+    // services, since a service can have been deleted) and finally to 30
+    // minutes.
+    const result = await this.pool.query<AppointmentRow>(
+      `SELECT a.*
+         FROM appointments a
+         LEFT JOIN services s ON s.id = a.service_id
+        WHERE a.account_id = $1
+          AND a.status <> 'canceled'
+          AND a.start_time < $3
+          AND COALESCE(
+                a.end_time,
+                a.start_time + make_interval(mins => COALESCE(s.duration_minutes, 30))
+              ) > $2
+        ORDER BY a.start_time ASC`,
+      [accountId, start, end]
+    );
+    return result.rows.map(toRecord);
   }
 
   async tryClaim(idempotencyKey: string): Promise<boolean> {
