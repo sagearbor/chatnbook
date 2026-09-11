@@ -11,9 +11,13 @@
 // is the last-resort fallback.
 (function(){
   const d = document;
+  // Capture synchronously: document.currentScript is only set while this
+  // script is executing. Reading it inside the deferred DOMContentLoaded
+  // callback below (when the page was still loading) would return null,
+  // losing data-account and the API origin for an `async` WordPress embed.
+  const script = d.currentScript as HTMLScriptElement | null;
   function ready(fn: () => void){ if(d.readyState!='loading'){fn()} else {d.addEventListener('DOMContentLoaded',fn)} }
   ready(() => {
-    const script = document.currentScript as HTMLScriptElement | null;
     const account = script?.getAttribute('data-account') || 'acct_demo';
     const nonce = script?.getAttribute('data-csp-nonce') || undefined;
     const params = new URLSearchParams(window.location.search);
