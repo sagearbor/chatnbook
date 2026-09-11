@@ -1,7 +1,8 @@
 // A minimal stand-in for the real Google Calendar v3 API, shaped exactly
 // like what packages/connectors-py/src/connectors/google.py calls:
-//   POST {base}/freeBusy                       -> { calendars: { <id>: { busy: [...] } } }
-//   POST {base}/calendars/{calendarId}/events   -> { id: <new event id> }
+//   POST   {base}/freeBusy                             -> { calendars: { <id>: { busy: [...] } } }
+//   POST   {base}/calendars/{calendarId}/events         -> { id: <new event id> }
+//   DELETE {base}/calendars/{calendarId}/events/{id}    -> 204, or 404 if unknown
 // Point GOOGLE_CALENDAR_API_BASE at this server's `base` to make the real
 // python connector (via python -m connectors.cli, spawned by
 // PythonCalendarConnector) talk to this instead of the real Google API.
@@ -12,6 +13,7 @@ import { URL } from 'node:url';
 export function startFakeCalendarBackend() {
   const busyByCalendar = new Map(); // calendarId -> [{start, end}]
   const createdEvents = []; // { calendarId, summary, start, end, id }
+  const deletedEvents = []; // { calendarId, id }
 
   const server = http.createServer((req, res) => {
     let body = '';
@@ -46,6 +48,26 @@ export function startFakeCalendarBackend() {
         return;
       }
 
+      const deleteMatch = url.pathname.match(/^\/calendars\/([^/]+)\/events\/([^/]+)$/);
+      if (req.method === 'DELETE' && deleteMatch) {
+        const calendarId = decodeURIComponent(deleteMatch[1]);
+        const eventId = decodeURIComponent(deleteMatch[2]);
+        const idx = createdEvents.findIndex((e) => e.calendarId === calendarId && e.id === eventId);
+        if (idx === -1) {
+          // Mirrors the real Google Calendar API's response for an
+          // unknown/already-deleted event -- google.py's delete_event
+          // treats this as success, not an error.
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: 'not found' }));
+          return;
+        }
+        deletedEvents.push(createdEvents[idx]);
+        createdEvents.splice(idx, 1);
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+
       res.writeHead(404);
       res.end(JSON.stringify({ error: `no such fake endpoint: ${req.method} ${url.pathname}` }));
     });
@@ -61,6 +83,7 @@ export function startFakeCalendarBackend() {
           busyByCalendar.set(calendarId, intervals);
         },
         createdEvents,
+        deletedEvents,
         async close() {
           await new Promise((r) => server.close(r));
         },

@@ -8,10 +8,17 @@ paths:
   /v1/services:
     get:
       summary: List services
+      description: >
+        Real services backed by Postgres/in-memory (see
+        migrations/003_create_services.sql). accountId is required --
+        there's no admin auth in front of this endpoint yet, so a bare
+        request without it is rejected rather than dumping every
+        account's services.
       parameters:
         - in: query
           name: accountId
-          schema: { type: string, format: uuid }
+          required: true
+          schema: { type: string }
       responses:
         '200':
           description: OK
@@ -24,6 +31,8 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Service'
+        '400':
+          description: accountId query parameter is missing
   /v1/availability:
     get:
       summary: Get availability
@@ -33,7 +42,11 @@ paths:
         connected calendar (via the Python connectors) for real busy
         intervals and computes free slots. accountId must have a
         provider calendar already connected via
-        `/oauth/{provider}/start` + `/oauth/{provider}/callback`.
+        `/oauth/{provider}/start` + `/oauth/{provider}/callback`. When
+        serviceId is also supplied, it must name a real service (see
+        GET /v1/services) belonging to accountId (404/400 otherwise),
+        and its durationMinutes + bufferMinutes -- not slotMinutes --
+        determine the slot length.
       parameters:
         - in: query
           name: accountId
@@ -225,10 +238,10 @@ components:
       type: object
       properties:
         id: { type: string }
+        accountId: { type: string }
         name: { type: string }
-        duration_min: { type: integer }
-        buffer_before_min: { type: integer }
-        buffer_after_min: { type: integer }
+        durationMinutes: { type: integer }
+        bufferMinutes: { type: integer }
     AppointmentRequest:
       type: object
       required: [accountId, serviceId, startTime, customer]

@@ -11,6 +11,9 @@ import { PgAppointmentsRepository } from './repositories/pg-appointments-repo.js
 import type { OAuthTokensRepository } from './repositories/oauth-tokens-repo.js';
 import { InMemoryOAuthTokensRepository } from './repositories/memory-oauth-tokens-repo.js';
 import { PgOAuthTokensRepository } from './repositories/pg-oauth-tokens-repo.js';
+import type { ServiceRecord, ServicesRepository } from './repositories/services-repo.js';
+import { InMemoryServicesRepository } from './repositories/memory-services-repo.js';
+import { PgServicesRepository } from './repositories/pg-services-repo.js';
 import { createOAuthRouter, getValidAccessToken, CalendarNotConnectedError } from './oauth/routes.js';
 import { isOAuthProvider } from './oauth/providers.js';
 import type { CalendarConnector } from './connectors/calendar-connector.js';
@@ -34,6 +37,12 @@ const oauthTokensRepo: OAuthTokensRepository = process.env.DATABASE_URL
   ? new PgOAuthTokensRepository(process.env.DATABASE_URL)
   : new InMemoryOAuthTokensRepository();
 
+// Same pattern for services (migrations/003_create_services.sql). Backs
+// GET /v1/services and lets GET /v1/availability honour a serviceId.
+const servicesRepo: ServicesRepository = process.env.DATABASE_URL
+  ? new PgServicesRepository(process.env.DATABASE_URL)
+  : new InMemoryServicesRepository();
+
 app.use(createOAuthRouter(oauthTokensRepo));
 
 // Calls the Python connectors (packages/connectors-py) for calendar
@@ -56,6 +65,13 @@ export function getOAuthTokensRepoForTest(): OAuthTokensRepository {
   return oauthTokensRepo;
 }
 
+/** Test/seed-only: direct access to the services repository. There's no
+ * admin HTTP endpoint for creating services yet (out of scope -- see
+ * docs/REALITY-CHECK.md), so tests seed rows directly through this. */
+export function getServicesRepoForTest(): ServicesRepository {
+  return servicesRepo;
+}
+
 function toAppointmentResponse(record: AppointmentRecord) {
   return {
     id: record.id,
@@ -63,6 +79,16 @@ function toAppointmentResponse(record: AppointmentRecord) {
     startTime: record.startTime,
     endTime: record.endTime ?? undefined,
     provider_event_id: record.providerEventId ?? undefined,
+  };
+}
+
+function toServiceResponse(record: ServiceRecord) {
+  return {
+    id: record.id,
+    accountId: record.accountId,
+    name: record.name,
+    durationMinutes: record.durationMinutes,
+    bufferMinutes: record.bufferMinutes,
   };
 }
 
@@ -103,10 +129,16 @@ export async function resetOAuthTokens() {
   await oauthTokensRepo.reset();
 }
 
+/** Test helper: clears persisted services state (Postgres or in-memory). */
+export async function resetServices() {
+  await servicesRepo.reset();
+}
+
 /** Test helper: closes the underlying DB pool / connections. */
 export async function closeRepositories() {
   await appointmentsRepo.close();
   await oauthTokensRepo.close();
+  await servicesRepo.close();
 }
 
 function verifyHmac(req: express.Request, res: express.Response, next: express.NextFunction) {
@@ -138,9 +170,23 @@ app.get(['/openapi.json', '/.well-known/openapi.json'], (_req, res) => {
   res.type('application/json').send(spec);
 });
 
-// /v1/services stays a stub -- out of scope for this task (no services
-// table exists yet; see docs/REALITY-CHECK.md).
-app.get('/v1/services', (_req, res) => res.json({ services: [] }));
+// Real services, backed by Postgres/in-memory (migrations/003_create_services.sql).
+// accountId is required -- services are account-scoped data, and there's
+// no admin auth in front of this endpoint yet, so we don't want a bare
+// GET /v1/services to dump every account's services.
+app.get('/v1/services', async (req, res) => {
+  const { accountId } = req.query;
+  if (!accountId || typeof accountId !== 'string') {
+    return res.status(400).json({ error: 'accountId query parameter is required' });
+  }
+  try {
+    const services = await servicesRepo.listByAccount(accountId);
+    res.json({ services: services.map(toServiceResponse) });
+  } catch (err) {
+    console.error('failed to list services', err);
+    res.status(500).json({ error: 'Failed to list services' });
+  }
+});
 
 // Real calendar availability when accountId/provider/calendarId are given
 // (queries the connected calendar via the Python connectors and computes
@@ -148,8 +194,8 @@ app.get('/v1/services', (_req, res) => res.json({ services: [] }));
 // they're not, so existing callers (e.g. packages/adapters/mcp, which
 // today only sends serviceId/start/end/tz) keep working unchanged.
 app.get('/v1/availability', async (req, res) => {
-  const { accountId, provider, calendarId, start, end } = req.query;
-  const slotMinutes = Number(req.query.slotMinutes) || 30;
+  const { accountId, provider, calendarId, start, end, serviceId } = req.query;
+  let slotMinutes = Number(req.query.slotMinutes) || 30;
   if (!accountId || !provider || !calendarId || !start || !end) {
     return res.json({ slots: [] });
   }
@@ -158,6 +204,22 @@ app.get('/v1/availability', async (req, res) => {
   }
   if (typeof start !== 'string' || typeof end !== 'string' || typeof calendarId !== 'string') {
     return res.status(400).json({ error: 'accountId, calendarId, start, and end must be strings' });
+  }
+  // Honour serviceId when given: the service's own duration + buffer
+  // determines the slot length, instead of trusting an arbitrary
+  // client-supplied slotMinutes to match the service being booked.
+  if (serviceId !== undefined) {
+    if (typeof serviceId !== 'string') {
+      return res.status(400).json({ error: 'serviceId must be a string' });
+    }
+    const service = await servicesRepo.getById(serviceId);
+    if (!service) {
+      return res.status(404).json({ error: `unknown serviceId: ${serviceId}` });
+    }
+    if (service.accountId !== accountId) {
+      return res.status(400).json({ error: 'serviceId does not belong to accountId' });
+    }
+    slotMinutes = service.durationMinutes + service.bufferMinutes;
   }
   try {
     const token = await getValidAccessToken(oauthTokensRepo, String(accountId), provider);
@@ -198,19 +260,104 @@ app.post('/v1/appointments', verifyHmac, async (req, res) => {
 
   try {
     // Idempotency replay check happens *before* any calendar work, so a
-    // retried request never creates a second real calendar event. (Two
-    // concurrent *first* requests with the same key can each pass this
-    // check and both call the calendar connector -- the DB's unique
-    // constraint on idempotency_key still prevents a duplicate DB row,
-    // but a stray duplicate calendar event is possible in that race. Not
-    // addressed here; would need a short-lived claim/lock to close.)
+    // retried request (after a prior request with this key already fully
+    // completed) never creates a second real calendar event.
     const existing = await appointmentsRepo.getByIdempotencyKey(key);
     if (existing) {
       return res.status(200).json(toAppointmentResponse(existing));
     }
 
+    // DB-level guard against two concurrent *first* requests with the same
+    // key (see migrations/005_create_idempotency_claims.sql): only the
+    // request that wins this atomic claim goes on to do the (expensive,
+    // side-effecting) calendar work below. A request that loses the race
+    // polls for the winner's row instead of duplicating it -- previously
+    // both requests could reach the calendar work and each create a real
+    // (duplicate) calendar event, since the getByIdempotencyKey check above
+    // is not itself atomic across concurrent requests.
+    const claimed = await appointmentsRepo.tryClaim(key);
+    if (!claimed) {
+      const winnerRecord = await waitForClaimedAppointment(key);
+      if (winnerRecord) {
+        return res.status(200).json(toAppointmentResponse(winnerRecord));
+      }
+      return res.status(409).json({
+        error: 'a request with this Idempotency-Key is already being processed; please retry',
+      });
+    }
+
+    // From here on, this request owns processing `key` -- release the
+    // claim on every exit path (success or failure) so a genuine retry
+    // (not a concurrent racer, but the same client trying again after a
+    // failure) can attempt the booking again with the same key.
+    try {
+      return await handleCreateAppointment(req, res, key, {
+        accountId,
+        serviceId,
+        startTime,
+        customer,
+        provider,
+        calendarId,
+        durationMinutes,
+      });
+    } finally {
+      await appointmentsRepo.releaseClaim(key);
+    }
+  } catch (err) {
+    console.error('failed to create appointment', err);
+    res.status(500).json({ error: 'Failed to create appointment' });
+  }
+});
+
+/** Polls for the appointment row a concurrent winner is creating (see the
+ * tryClaim guard above), so a losing request returns the same result
+ * instead of duplicating calendar work. Short poll: the winner is usually
+ * done within one or two calendar round-trips. */
+async function waitForClaimedAppointment(
+  key: string,
+  timeoutMs = 3000,
+  intervalMs = 25
+): Promise<AppointmentRecord | null> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const record = await appointmentsRepo.getByIdempotencyKey(key);
+    if (record) return record;
+    if (Date.now() >= deadline) return null;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
+/** The actual booking logic, run only by the request that won the
+ * idempotency-key claim above. Sends the response itself (so the caller
+ * can `return` its result directly) and always returns after responding. */
+async function handleCreateAppointment(
+  req: express.Request,
+  res: express.Response,
+  key: string,
+  body: {
+    accountId: string;
+    serviceId: string;
+    startTime: string;
+    customer: { name: string; email: string; phone?: string };
+    provider?: string;
+    calendarId?: string;
+    durationMinutes?: number;
+  }
+) {
+  const { accountId, serviceId, startTime, customer, provider, calendarId, durationMinutes } = body;
+  try {
     let providerEventId: string | undefined;
     if (provider) {
+      // Re-validated here (already checked once in the outer route
+      // handler before the idempotency claim) so TypeScript narrows
+      // `provider`/`calendarId` to the non-optional types the connector
+      // calls below require.
+      if (!isOAuthProvider(provider)) {
+        return res.status(400).json({ error: `unsupported provider: ${provider}` });
+      }
+      if (!calendarId) {
+        return res.status(400).json({ error: 'calendarId is required when provider is set' });
+      }
       let token: string;
       try {
         token = await getValidAccessToken(oauthTokensRepo, accountId, provider);
@@ -272,6 +419,8 @@ app.post('/v1/appointments', verifyHmac, async (req, res) => {
       source: req.body?.source,
       metadata: req.body?.metadata,
       providerEventId,
+      provider: provider ?? undefined,
+      calendarId: calendarId ?? undefined,
     });
     if (created) {
       sendNotification({
@@ -285,10 +434,50 @@ app.post('/v1/appointments', verifyHmac, async (req, res) => {
     console.error('failed to create appointment', err);
     res.status(500).json({ error: 'Failed to create appointment' });
   }
-});
+}
 
 app.post('/v1/appointments/:id/cancel', verifyHmac, async (req, res) => {
   try {
+    const existing = await appointmentsRepo.getById(req.params.id);
+    if (!existing) {
+      return res.status(404).json({ error: 'Appointment not found' });
+    }
+
+    // Delete the real calendar event when one was created for this
+    // appointment. Tolerates the connector reporting the event as already
+    // gone (see connectors-py's google.py/microsoft.py delete_event,
+    // called via PythonCalendarConnector.deleteEvent) -- that resolves
+    // normally rather than throwing, so cancelling twice (or cancelling an
+    // event someone already deleted directly on the provider) still
+    // succeeds here.
+    if (existing.providerEventId && existing.provider && existing.calendarId) {
+      if (!isOAuthProvider(existing.provider)) {
+        console.error(
+          `appointment ${existing.id} has unsupported provider ${existing.provider}; skipping calendar delete`
+        );
+      } else {
+        try {
+          const token = await getValidAccessToken(oauthTokensRepo, existing.accountId, existing.provider);
+          await calendarConnector.deleteEvent({
+            provider: existing.provider,
+            token,
+            calendarId: existing.calendarId,
+            eventId: existing.providerEventId,
+          });
+        } catch (err) {
+          if (err instanceof CalendarNotConnectedError) {
+            // Calendar was disconnected after booking -- nothing we can do
+            // to remove the remote event from here; still cancel locally
+            // rather than blocking the customer's cancellation on it.
+            console.error('cannot delete calendar event: calendar no longer connected', err);
+          } else {
+            console.error('calendar connector error deleting event', err);
+            return res.status(502).json({ error: 'Failed to delete calendar event' });
+          }
+        }
+      }
+    }
+
     const record = await appointmentsRepo.cancel(req.params.id);
     if (!record) {
       return res.status(404).json({ error: 'Appointment not found' });

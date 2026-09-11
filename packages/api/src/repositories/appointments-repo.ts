@@ -25,6 +25,14 @@ export interface AppointmentRecord {
   source: string | null;
   metadata: Record<string, unknown> | null;
   providerEventId: string | null;
+  /** Which calendar connector was used to create providerEventId ('google'
+   * | 'microsoft'), or null when no provider was set at booking time. Read
+   * back on cancel (see index.ts) to know which connector to call to
+   * delete the real event. */
+  provider: string | null;
+  /** The calendarId the event was created on, or null when no provider was
+   * set. Needed alongside provider + providerEventId to delete the event. */
+  calendarId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -42,6 +50,11 @@ export interface CreateAppointmentInput {
    * ../connectors/calendar-connector.ts and index.ts's /v1/appointments
    * handler) -- stored on the same INSERT as the appointment row. */
   providerEventId?: string;
+  /** The provider/calendarId used to create providerEventId, stored
+   * alongside it so cancellation can later delete the real event. Both are
+   * omitted together with providerEventId when no provider was set. */
+  provider?: string;
+  calendarId?: string;
 }
 
 export interface AppointmentsRepository {
@@ -60,6 +73,20 @@ export interface AppointmentsRepository {
   getByIdempotencyKey(idempotencyKey: string): Promise<AppointmentRecord | null>;
   cancel(id: string): Promise<AppointmentRecord | null>;
   reschedule(id: string, newStartTime: string): Promise<AppointmentRecord | null>;
+  /**
+   * Atomically claims an idempotency key before any side-effecting work
+   * begins (see index.ts's POST /v1/appointments) -- returns true if this
+   * call is the first to claim it, false if another (still in-flight, or
+   * already-finished-or-failed) request holds/held the claim. Backed by a
+   * DB-level unique constraint (migrations/005_create_idempotency_claims.sql)
+   * so it's safe across concurrent requests hitting different processes,
+   * not just concurrent promises within one.
+   */
+  tryClaim(idempotencyKey: string): Promise<boolean>;
+  /** Releases a claim taken by tryClaim, whether the claiming request
+   * succeeded or failed -- always call this in a finally block so a failed
+   * attempt doesn't permanently lock out retries with the same key. */
+  releaseClaim(idempotencyKey: string): Promise<void>;
   /** Test-only: clears all data. */
   reset(): Promise<void>;
   close(): Promise<void>;

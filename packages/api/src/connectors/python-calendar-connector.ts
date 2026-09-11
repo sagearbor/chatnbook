@@ -12,6 +12,7 @@ import type {
   CalendarConnector,
   GetBusyParams,
   CreateEventParams,
+  DeleteEventParams,
   ComputeAvailabilityParams,
   BusyInterval,
   AvailabilitySlot,
@@ -106,6 +107,10 @@ export class PythonCalendarConnector implements CalendarConnector {
 
   async createEvent(params: CreateEventParams): Promise<{ eventId: string }> {
     return runCli<{ eventId: string }>({ action: 'create_event', ...params });
+  }
+
+  async deleteEvent(params: DeleteEventParams): Promise<void> {
+    await runCli<Record<string, never>>({ action: 'delete_event', ...params });
   }
 
   async computeAvailability(params: ComputeAvailabilityParams): Promise<AvailabilitySlot[]> {

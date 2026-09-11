@@ -24,6 +24,13 @@ Request shapes:
      "summary": str}
     -> {"ok": true, "result": {"eventId": str}}
 
+  delete_event:
+    {"action": "delete_event", "provider": "google"|"microsoft",
+     "token": str, "calendarId": str, "eventId": str}
+    -> {"ok": true, "result": {}}
+    Tolerates the event already being gone (404/410 from the provider) --
+    see google.delete_event / microsoft.delete_event.
+
   compute_availability:
     {"action": "compute_availability", "start": iso, "end": iso,
      "busy": [[startIso, endIso], ...], "slotMinutes": int}
@@ -86,6 +93,17 @@ def handle_create_event(req: Dict[str, Any]) -> Dict[str, Any]:
     return {"eventId": event_id}
 
 
+def handle_delete_event(req: Dict[str, Any]) -> Dict[str, Any]:
+    provider = req.get("provider")
+    if provider == "google":
+        google.delete_event(req["token"], req["calendarId"], req["eventId"])
+    elif provider == "microsoft":
+        microsoft.delete_event(req["token"], req["calendarId"], req["eventId"])
+    else:
+        raise ValueError(f"provider does not support delete_event: {provider!r}")
+    return {}
+
+
 def handle_compute_availability(req: Dict[str, Any]) -> Dict[str, Any]:
     start = _parse_dt(req["start"])
     end = _parse_dt(req["end"])
@@ -98,6 +116,7 @@ def handle_compute_availability(req: Dict[str, Any]) -> Dict[str, Any]:
 ACTIONS = {
     "get_busy": handle_get_busy,
     "create_event": handle_create_event,
+    "delete_event": handle_delete_event,
     "compute_availability": handle_compute_availability,
 }
 

@@ -48,3 +48,15 @@ def create_event(
     resp = requests.post(url, json=payload, headers=headers, timeout=10)
     resp.raise_for_status()
     return resp.json()["id"]
+
+
+def delete_event(token: str, calendar_id: str, event_id: str) -> None:
+    """Delete an event. Tolerates the event already being gone (404/410 --
+    e.g. deleted directly on the provider, or a stale/duplicate cancel
+    request) by treating that as success rather than raising."""
+    url = f"{API_BASE}/calendars/{calendar_id}/events/{event_id}"
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.delete(url, headers=headers, timeout=10)
+    if resp.status_code in (404, 410):
+        return
+    resp.raise_for_status()

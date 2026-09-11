@@ -14,6 +14,7 @@ import type {
 export class InMemoryAppointmentsRepository implements AppointmentsRepository {
   private byId = new Map<string, AppointmentRecord>();
   private byIdempotencyKey = new Map<string, string>();
+  private claims = new Set<string>();
 
   async createIdempotent(
     input: CreateAppointmentInput
@@ -40,6 +41,8 @@ export class InMemoryAppointmentsRepository implements AppointmentsRepository {
       source: input.source ?? null,
       metadata: input.metadata ?? null,
       providerEventId: input.providerEventId ?? null,
+      provider: input.provider ?? null,
+      calendarId: input.calendarId ?? null,
       createdAt: now,
       updatedAt: now,
     };
@@ -82,9 +85,25 @@ export class InMemoryAppointmentsRepository implements AppointmentsRepository {
     return updated;
   }
 
+  async tryClaim(idempotencyKey: string): Promise<boolean> {
+    // No `await` between the check and the mutation, so this is atomic
+    // with respect to other requests in the same process (Node won't
+    // interleave two calls to this function mid-body) -- the same
+    // guarantee the Postgres implementation gets from its unique
+    // constraint, just via the single-threaded event loop instead of the DB.
+    if (this.claims.has(idempotencyKey)) return false;
+    this.claims.add(idempotencyKey);
+    return true;
+  }
+
+  async releaseClaim(idempotencyKey: string): Promise<void> {
+    this.claims.delete(idempotencyKey);
+  }
+
   async reset(): Promise<void> {
     this.byId.clear();
     this.byIdempotencyKey.clear();
+    this.claims.clear();
   }
 
   async close(): Promise<void> {

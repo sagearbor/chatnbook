@@ -13,13 +13,14 @@
     "/v1/services": {
       "get": {
         "summary": "List services",
+        "description": "Real services backed by Postgres/in-memory (see migrations/003_create_services.sql). accountId is required -- there's no admin auth in front of this endpoint yet, so a bare request without it is rejected rather than dumping every account's services.\n",
         "parameters": [
           {
             "in": "query",
             "name": "accountId",
+            "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "type": "string"
             }
           }
         ],
@@ -41,6 +42,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "accountId query parameter is missing"
           }
         }
       }
@@ -48,7 +52,7 @@
     "/v1/availability": {
       "get": {
         "summary": "Get availability",
-        "description": "Returns `{ slots: [] }` unless accountId, provider, calendarId, start, and end are all supplied, in which case it queries the connected calendar (via the Python connectors) for real busy intervals and computes free slots. accountId must have a provider calendar already connected via `/oauth/{provider}/start` + `/oauth/{provider}/callback`.\n",
+        "description": "Returns `{ slots: [] }` unless accountId, provider, calendarId, start, and end are all supplied, in which case it queries the connected calendar (via the Python connectors) for real busy intervals and computes free slots. accountId must have a provider calendar already connected via `/oauth/{provider}/start` + `/oauth/{provider}/callback`. When serviceId is also supplied, it must name a real service (see GET /v1/services) belonging to accountId (404/400 otherwise), and its durationMinutes + bufferMinutes -- not slotMinutes -- determine the slot length.\n",
         "parameters": [
           {
             "in": "query",
@@ -418,16 +422,16 @@
           "id": {
             "type": "string"
           },
+          "accountId": {
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
-          "duration_min": {
+          "durationMinutes": {
             "type": "integer"
           },
-          "buffer_before_min": {
-            "type": "integer"
-          },
-          "buffer_after_min": {
+          "bufferMinutes": {
             "type": "integer"
           }
         }
