@@ -42,6 +42,12 @@ export interface CreateAppointmentInput {
   accountId: string;
   serviceId: string;
   startTime: string;
+  /** When the appointment ends -- startTime + the service's durationMinutes,
+   * computed by the booking handler in index.ts. Persisted so the overlap
+   * check (listByAccountInRange) can tell how long an existing booking
+   * occupies without re-looking-up its service. Optional only for
+   * backwards compatibility with callers that predate it. */
+  endTime?: string;
   customer: { name: string; email: string; phone?: string };
   notes?: string;
   source?: string;
@@ -73,6 +79,22 @@ export interface AppointmentsRepository {
   getByIdempotencyKey(idempotencyKey: string): Promise<AppointmentRecord | null>;
   cancel(id: string): Promise<AppointmentRecord | null>;
   reschedule(id: string, newStartTime: string): Promise<AppointmentRecord | null>;
+  /**
+   * All *non-canceled* appointments for `accountId` whose own
+   * [startTime, endTime) interval overlaps [start, end). Backs two things
+   * in index.ts: the double-booking 409 on both booking routes, and the
+   * business-hours availability fallback (which subtracts these from the
+   * generated slots).
+   *
+   * Rows whose end_time is null (written before endTime was persisted)
+   * fall back to the row's service's durationMinutes, or 30 minutes when
+   * that service no longer exists.
+   */
+  listByAccountInRange(
+    accountId: string,
+    start: string,
+    end: string
+  ): Promise<AppointmentRecord[]>;
   /**
    * Atomically claims an idempotency key before any side-effecting work
    * begins (see index.ts's POST /v1/appointments) -- returns true if this

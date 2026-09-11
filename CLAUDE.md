@@ -95,13 +95,109 @@ instead of the real thing -- no real client ids/secrets needed to test it.
 `GET /v1/services?accountId=...` lists real services (id, accountId, name,
 durationMinutes, bufferMinutes) backed by Postgres/in-memory (see
 `packages/api/src/repositories/services-repo.ts` and
-`migrations/003_create_services.sql`). accountId is required. There's no
-admin HTTP endpoint to create a service yet -- seed rows directly through
-the repository (see `getServicesRepoForTest()` in `src/index.ts`, used by
-`test/services.test.js`). `GET /v1/availability` honours a `serviceId`
-query param by looking the service up (404 if unknown, 400 if it belongs
-to a different account) and using its `durationMinutes + bufferMinutes` as
-the slot length, overriding any client-supplied `slotMinutes`.
+`migrations/003_create_services.sql`). accountId is required.
+`GET /v1/availability` honours a `serviceId` query param by looking the
+service up (404 if unknown, 400 if it belongs to a different account) and
+using its `durationMinutes + bufferMinutes` as the slot length, overriding
+any client-supplied `slotMinutes`.
+
+`POST /v1/services` creates one. It's operator tooling, not an agent API,
+so it's guarded by a shared admin key rather than the agent HMAC: header
+`X-Admin-Key` must equal env `ADMIN_API_KEY`. When `ADMIN_API_KEY` is
+unset the endpoint answers **503** `{error:'admin API not configured'}`
+(deliberately distinguishable from **401** for a wrong key). Body:
+`{accountId, name, durationMinutes, bufferMinutes?=0, id?}` -> 201 with
+the same shape `GET /v1/services` returns. An explicit `id` lets an
+operator seed a stable, known service id. Tests and seed code can also go
+straight through `getServicesRepoForTest()` in `src/index.ts`.
+
+### Public (browser) booking
+`POST /v1/public/appointments` is the path the embeddable widget uses. A
+page on a customer's site can't hold the agent HMAC secret, so this route
+has **no `X-Signature`**; the existing per-IP rate limiter is the only
+throttle. `Idempotency-Key` is **optional** (one is generated server-side
+when absent) -- supplying one gives the same replay semantics as the
+signed route. Body: `{accountId, serviceId, startTime, customer:{name,
+email, phone?}, notes?}`. `provider`, `calendarId` and `durationMinutes`
+in the body are ignored: the appointment's length always comes from the
+named service, and a public caller must never be able to aim a write at an
+arbitrary calendar. (A later version may look up the *account's own*
+connected calendar server-side.)
+
+Responses: 201 created / 200 idempotent replay (both in the usual
+`toAppointmentResponse` shape) / 400 validation / 404 unknown serviceId or
+one that doesn't belong to accountId / 409 overlap / 429 rate limited.
+
+Both booking routes share the same internals -- `bookWithIdempotency()`
+(replay check, `tryClaim`/`releaseClaim`) then `handleCreateAppointment()`
+-- so there's exactly one copy of the booking logic. The signed
+`POST /v1/appointments` is unchanged, including its tolerance of
+serviceIds with no `services` row (`packages/adapters/mcp` sends those;
+that route alone falls back to the body's `durationMinutes`, then 30).
+
+### Double-booking guard (no calendar required)
+`AppointmentsRepository.listByAccountInRange(accountId, start, end)`
+returns the account's non-canceled appointments overlapping a window; both
+booking routes 409 with `{error:'slot no longer available'}` when the
+requested `[startTime, startTime + service.durationMinutes)` hits one.
+Appointments persist `end_time` (start + the *service's* duration, buffer
+excluded); the Postgres query falls back to the row's service duration
+(then 30 min) for legacy rows whose `end_time` is null, so no new
+migration was needed. `reschedule` shifts `end_time` with `start_time` so
+the stored duration stays correct.
+
+### Business-hours availability fallback
+`GET /v1/availability?accountId=&serviceId=&start=&end=` **without**
+`provider` no longer returns the `{slots:[]}` stub: it generates slots
+from the instance's declared business hours minus the account's existing
+non-canceled appointments, never starting a slot in the past. Configured
+by env `BUSINESS_HOURS` (default `Mon-Fri 09:00-17:00`) and `BUSINESS_TZ`
+(default `America/New_York`). The format is comma-separated
+`"<Day>[-<Day>] HH:MM-HH:MM"` entries, e.g.
+`"Mon-Fri 09:00-17:00,Sat 10:00-14:00"`; day ranges may wrap the week and
+unparseable entries are skipped rather than crashing startup. Slot length
+is the service's `durationMinutes + bufferMinutes` when `serviceId` is
+given, else `slotMinutes` or 30. The math lives in
+`packages/api/src/business-hours.ts` -- dependency-free TypeScript using
+`Intl.DateTimeFormat` for the zone offset (so DST transitions land
+correctly); no Python subprocess on this path. Behaviour with `provider`
+set is unchanged, and a request missing accountId/start/end still returns
+`{slots:[]}`.
+
+### Demo seed
+Setting env `SEED_DEMO_ACCOUNT` (e.g. `acct_demo`) makes the API ensure
+that account has two services with **stable ids** at startup:
+`svc_demo_consult` "30-minute consultation" (30 min, 0 buffer) and
+`svc_demo_full` "60-minute appointment" (60 min, 10 buffer). Idempotent
+(existing ids are skipped) and works against either repository. It exists
+because the hosted demo runs with `DATABASE_URL` unset, so every cold
+start would otherwise begin with no services at all. One log line reports
+what it did.
+
+### Static widget + demo page
+The API serves the built browser widget so a customer's site needs one
+`<script src>` and no CDN: `GET /widget.js` serves
+`packages/widget/dist/loader.js`, and `/widget/*` serves the rest of that
+directory (`app.html`, `app.js`, `a11y.js`). The directory is resolved
+relative to the api package (`import.meta.url` -> `../widget/dist`) and
+overridable with env `WIDGET_DIST_DIR`. A missing directory logs a warning
+and 404s -- it never crashes the server, since the widget is built by a
+different package. `GET /demo` serves `packages/api/public/demo.html`
+(which embeds the widget exactly the way the WordPress plugin does:
+`<script src="/widget.js" data-account="acct_demo" async></script>`), and
+`GET /` redirects to it.
+
+### Self-describing URLs (PUBLIC_API_BASE)
+`app.set('trust proxy', true)` so Cloud Run's terminated TLS is honoured.
+The served `/openapi.json` has its `servers[0].url` rewritten at request
+time -- to env `PUBLIC_API_BASE` when set, otherwise
+`${req.protocol}://${req.get('host')}` -- and
+`/.well-known/ai-actions.json` builds absolute action URLs the same way
+(`getWellKnownDocument(baseUrl)` in `packages/discovery/well_known.ts`),
+so a deployed instance never advertises `api.example.com` or localhost.
+Note that `src/index.ts` is ESM (`"type": "module"`): resolve paths from
+`fileURLToPath(import.meta.url)`, never `__dirname` -- the `/openapi.json`
+route used to throw for exactly that reason.
 
 ### Calendar connector wiring (availability + event creation)
 `POST /v1/appointments` and `GET /v1/availability` call the Python
@@ -169,6 +265,8 @@ and one DB row are created.
 ```bash
 curl http://localhost:3000/health
 curl http://localhost:3000/openapi.json
+curl http://localhost:3000/.well-known/ai-actions.json
+open http://localhost:3000/demo    # / redirects here
 ```
 
 ### Widget

@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>chatnbook demo</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #fbfaf8;
+        --surface: #ffffff;
+        --ink: #1b1a18;
+        --muted: #5f5b55;
+        --line: #e4e0d9;
+        --accent: #3b5bdb;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #16161a;
+          --surface: #1f1f25;
+          --ink: #f2f0ed;
+          --muted: #a8a49d;
+          --line: #33333c;
+          --accent: #8ea3ff;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font: 16px/1.6 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          Roboto, Helvetica, Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      main {
+        max-width: 44rem;
+        margin: 0 auto;
+        padding: 4rem 1.5rem 6rem;
+      }
+      .eyebrow {
+        font-size: 0.75rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 0 0 0.75rem;
+      }
+      h1 {
+        font-size: clamp(2rem, 6vw, 2.75rem);
+        line-height: 1.15;
+        letter-spacing: -0.02em;
+        margin: 0 0 1rem;
+      }
+      p.lede {
+        font-size: 1.075rem;
+        color: var(--muted);
+        margin: 0 0 2.5rem;
+        max-width: 38rem;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 0.9em;
+        background: color-mix(in srgb, var(--ink) 8%, transparent);
+        padding: 0.1em 0.35em;
+        border-radius: 4px;
+      }
+      .panel {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+      }
+      h2 {
+        font-size: 0.8rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 0 0 1rem;
+        font-weight: 600;
+      }
+      ul.links {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 0.6rem;
+      }
+      ul.links a {
+        color: var(--accent);
+        text-decoration: none;
+        font-weight: 500;
+      }
+      ul.links a:hover { text-decoration: underline; }
+      ul.links span {
+        color: var(--muted);
+        font-weight: 400;
+      }
+      pre {
+        margin: 0;
+        padding: 1rem;
+        border-radius: 8px;
+        background: color-mix(in srgb, var(--ink) 6%, transparent);
+        overflow-x: auto;
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 0.85rem;
+        line-height: 1.5;
+      }
+      footer {
+        color: var(--muted);
+        font-size: 0.85rem;
+        border-top: 1px solid var(--line);
+        padding-top: 1.25rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">chatnbook</p>
+      <h1>chatnbook demo</h1>
+      <p class="lede">
+        This is a live demo booking against the hosted API for account
+        <code>acct_demo</code>. Slots come from the account's configured business
+        hours, and anything you book here is a real appointment in this
+        instance &mdash; so please keep it to test data.
+      </p>
+
+      <section class="panel">
+        <h2>Poke at the API</h2>
+        <ul class="links">
+          <li><a href="/health">/health</a> <span>&mdash; liveness check</span></li>
+          <li><a href="/openapi.json">/openapi.json</a> <span>&mdash; the full OpenAPI document</span></li>
+          <li>
+            <a href="/.well-known/ai-actions.json">/.well-known/ai-actions.json</a>
+            <span>&mdash; how agents discover the booking actions</span>
+          </li>
+        </ul>
+      </section>
+
+      <section class="panel">
+        <h2>Embedding it</h2>
+        <p style="margin: 0 0 1rem; color: var(--muted)">
+          The widget below is embedded exactly the way the WordPress plugin
+          does it &mdash; one script tag, one data attribute:
+        </p>
+        <pre>&lt;script src="/widget.js" data-account="acct_demo" async&gt;&lt;/script&gt;</pre>
+      </section>
+
+      <footer>
+        Booking widget loads below. If nothing appears, the widget bundle
+        hasn't been built for this deployment yet.
+      </footer>
+    </main>
+
+    <script src="/widget.js" data-account="acct_demo" async></script>
+  </body>
+</html>
