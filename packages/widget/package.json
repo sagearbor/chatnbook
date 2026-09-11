@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/strip-loader-export.js",
+    "build": "tsc -p tsconfig.json && node scripts/strip-loader-export.js && node scripts/copy-static.js",
     "dev": "ts-node src/loader.ts",
     "pretest": "npm run build",
     "test": "node --test test/*.test.mjs"

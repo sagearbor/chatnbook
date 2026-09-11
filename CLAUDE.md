@@ -171,6 +171,59 @@ curl http://localhost:3000/health
 curl http://localhost:3000/openapi.json
 ```
 
+### Widget
+`packages/widget/` builds three files with `pnpm --filter @smb/widget build`
+(plain `tsc` + two small Node scripts, no bundler): `dist/loader.js`,
+`dist/app.js`/`dist/a11y.js` (real ESM), and `dist/app.html` (copied
+verbatim from `src/app.html` by `scripts/copy-static.js`). The API serves
+these statically: `GET /widget.js` -> `dist/loader.js`, and
+`GET /widget/app.html`, `/widget/app.js`, `/widget/a11y.js` -> `dist/*`. A
+WordPress (or any) page embeds exactly
+`<script src="https://<api>/widget.js" data-account="acct_demo" async></script>`.
+
+- **Loader** (`src/loader.ts`, classic script -- see
+  `scripts/strip-loader-export.js` for why): derives the API origin from its
+  own `<script src>` (`new URL(document.currentScript.src).origin`),
+  falling back to `window.WIDGET_APP_ORIGIN` and then the page's own origin.
+  It renders a fixed bottom-right round "Book now" launcher button
+  (`#smb-widget-button`) that toggles a normally-closed iframe
+  (`#smb-widget-frame`, `data-smb-open="0"|"1"`) pointed at
+  `${origin}/widget/app.html?account=<account>&api=<origin>`. The widget
+  auto-opens when the host page has `?agent=1` or `?smb=open`, and `?agent=1`
+  also propagates into the iframe src/dataset. `data-csp-nonce` on the
+  loader script tag is applied to the injected `<style>` element. On narrow
+  viewports the iframe expands to fill the screen instead of a fixed
+  360x520 box.
+- **App** (`src/app.html` + `src/app.ts`, vanilla TS/DOM, no framework):
+  runs inside the iframe and drives a 4-step booking flow --
+  services (`GET /v1/services`) -> day/time (`GET /v1/availability` for the
+  picked day's local `[00:00,24:00)` window) -> a details form (name,
+  email, phone optional, notes optional) -> confirmation
+  (`POST /v1/public/appointments` with a per-attempt `Idempotency-Key`,
+  reused on retry). A 409 (slot just taken) bounces back to the day/time
+  step with a fresh slot list; 400/429/network errors show an inline
+  message, 429/network errors offer a Retry button that resends the same
+  request.
+- **Agent mode** (`?agent=1`, propagated by the loader): sets
+  `data-agent="1"` on the widget root and stable `data-agent-id` attributes
+  on every interactive element/list container so an agent can drive the
+  flow without relying on layout: `service-list`, `service-<id>`,
+  `day-list`, `day-<YYYY-MM-DD>`, `slot-list`, `slot-<ISO start>`, `name`,
+  `email`, `phone`, `notes`, `book-btn`, `confirmation`, `appointment-id`,
+  `error`. This list is also documented at the top of `src/app.ts` -- keep
+  both in sync if it changes.
+- **Accessibility**: the widget root is `role="dialog"` with an
+  `aria-label`; there's an `aria-live="polite"` status region plus a
+  `role="alert"` error region; every step's heading receives focus when
+  that step renders; inputs have `<label>`s; interactive controls are real
+  `<button>`s.
+- **Tests** (`test/*.test.mjs`, `node --test` + jsdom, run via
+  `pnpm --filter @smb/widget test`; `pretest` builds first):
+  `loader.test.mjs` loads the built `dist/loader.js` as a classic script
+  and asserts the launcher/iframe wiring; `app.test.mjs` mocks
+  `globalThis.fetch` and drives the full flow (including the 409 and
+  agent-mode paths) against `dist/app.js`.
+
 ## Architecture
 
 ### Core Components
