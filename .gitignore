@@ -4,7 +4,6 @@ dist
 build
 .env
 coverage
-pnpm-lock.yaml
 /packages/connectors-py/.venv/
 __pycache__/
 *.pyc
