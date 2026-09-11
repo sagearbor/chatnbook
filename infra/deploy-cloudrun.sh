@@ -1,0 +1,222 @@
+#!/usr/bin/env bash
+# Deploy the chatnbook API (packages/api, run via ../Dockerfile) to Google
+# Cloud Run from source. `gcloud run deploy --source` has Cloud Build build
+# the repo's Dockerfile -- no local Docker required to deploy (though this
+# repo's Dockerfile is also used for local `docker build`/compose).
+#
+# WHAT THIS DOES
+#   1. Resolves AGENT_HMAC_SECRET, TOKEN_ENCRYPTION_KEY, ADMIN_API_KEY from
+#      (in order) the real environment, then the repo-root .env, generating
+#      fresh random ones with `openssl rand -base64 32` for anything still
+#      missing -- printing a clear warning that generated values are
+#      ephemeral (this run only) and where they were saved.
+#   2. Enables the Cloud Run + Cloud Build APIs (idempotent).
+#   3. Deploys `--source $REPO_ROOT` so Cloud Build builds ../Dockerfile.
+#   4. Prints the service URL and curls /health to confirm it came up.
+#
+# USAGE
+#   ./infra/deploy-cloudrun.sh
+#   GCP_PROJECT=my-project ./infra/deploy-cloudrun.sh
+#   ./infra/deploy-cloudrun.sh my-project us-central1 chatnbook-api
+#   # (positional args win over env vars, which win over the defaults below)
+#
+# PREREQS: gcloud installed + `gcloud auth login`, a GCP project with
+# billing enabled. This script does not create a project or credentials.
+#
+# NOTE ON DATA: this deploys with DATABASE_URL unset unless you've set it
+# (real env or repo-root .env) -- meaning the API runs on its in-memory
+# repositories and all data resets on every cold start. See docs/DEPLOY.md
+# for how to attach a real Postgres afterwards via
+# `gcloud run services update`.
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Resolve repo root (this script lives in <repo>/infra/).
+# ---------------------------------------------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# ---------------------------------------------------------------------------
+# Config (positional args win over env vars, which win over these defaults).
+# ---------------------------------------------------------------------------
+PROJECT="${1:-${GCP_PROJECT:-arborfam-hub}}"
+REGION="${2:-${GCP_REGION:-us-central1}}"
+SERVICE="${3:-${GCP_SERVICE:-chatnbook-api}}"
+
+if ! command -v gcloud >/dev/null 2>&1; then
+  echo "ERROR: gcloud not found. Install it: brew install --cask google-cloud-sdk" >&2
+  echo "  then: gcloud auth login && gcloud config set project $PROJECT" >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# .env reader -- parses only the one key requested per call, so an arbitrary
+# repo-root .env can't inject env into this shell. Real environment
+# variables always take precedence over the .env file.
+# ---------------------------------------------------------------------------
+ENV_FILE="$REPO_ROOT/.env"
+
+read_env() {
+  # read_env KEY -> echoes the value from $ENV_FILE, or empty. Strips
+  # optional surrounding quotes and an inline `export `; ignores
+  # comments/blank lines. Last matching assignment wins.
+  local key="$1"
+  [[ -f "$ENV_FILE" ]] || return 0
+  local line
+  line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}=" "$ENV_FILE" | tail -n 1 || true)"
+  [[ -n "$line" ]] || return 0
+  local val="${line#*=}"
+  val="${val#"${val%%[![:space:]]*}"}"
+  val="${val%"${val##*[![:space:]]}"}"
+  if [[ "$val" == \"*\" && "$val" == *\" ]]; then val="${val%\"}"; val="${val#\"}"; fi
+  if [[ "$val" == \'*\' && "$val" == *\' ]]; then val="${val%\'}"; val="${val#\'}"; fi
+  printf '%s' "$val"
+}
+
+# ---------------------------------------------------------------------------
+# Required app secrets: real env > repo-root .env > freshly generated.
+# Generated values are ephemeral (this deploy only) -- they're written to
+# tmp/cloudrun-secrets.env (chmod 600, gitignored) so a follow-up deploy or
+# `gcloud run services update` can reuse the same ones instead of rotating
+# them every time this script runs.
+# ---------------------------------------------------------------------------
+SECRETS_FILE="$REPO_ROOT/tmp/cloudrun-secrets.env"
+
+# NOTE: this loop deliberately assigns via `printf -v` rather than through a
+# function's stdout via `$(...)` -- a command substitution runs in a
+# subshell, so a `generated_any=1` set inside a function called that way
+# would be invisible back in this shell. Looping inline avoids that trap.
+generated_any=0
+for secret_name in AGENT_HMAC_SECRET TOKEN_ENCRYPTION_KEY ADMIN_API_KEY; do
+  secret_val="${!secret_name:-}"
+  [[ -n "$secret_val" ]] || secret_val="$(read_env "$secret_name")"
+  if [[ -z "$secret_val" ]]; then
+    secret_val="$(openssl rand -base64 32)"
+    generated_any=1
+    echo "   generated: ${secret_name} (not found in env or .env)" >&2
+  fi
+  printf -v "$secret_name" '%s' "$secret_val"
+done
+
+if [[ "$generated_any" -eq 1 ]]; then
+  mkdir -p "$REPO_ROOT/tmp"
+  {
+    echo "# Generated by infra/deploy-cloudrun.sh on $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "# EPHEMERAL: only the values actually missing from your environment/.env"
+    echo "# were (re)generated here -- copy any you want to keep into .env, or the"
+    echo "# next run of this script will generate different ones."
+    echo "AGENT_HMAC_SECRET=${AGENT_HMAC_SECRET}"
+    echo "TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}"
+    echo "ADMIN_API_KEY=${ADMIN_API_KEY}"
+  } >"$SECRETS_FILE"
+  chmod 600 "$SECRETS_FILE"
+  echo "WARNING: one or more secrets were not set in the environment or $ENV_FILE." >&2
+  echo "         Generated ephemeral values and saved them to: $SECRETS_FILE" >&2
+  echo "         (chmod 600, gitignored). Reuse them by exporting from that file," >&2
+  echo "         or add the ones you want to keep to $ENV_FILE." >&2
+fi
+
+# ---------------------------------------------------------------------------
+# Optional config: forwarded to Cloud Run only when set in the environment
+# or repo-root .env; omitted entirely otherwise (so, e.g., no DATABASE_URL
+# means the deploy runs on in-memory repositories -- see docs/DEPLOY.md).
+# ---------------------------------------------------------------------------
+resolve_default() {
+  # resolve_default VAR_NAME DEFAULT -> prints real env, else .env, else
+  # DEFAULT. Unlike resolve_secret, never generates a random value.
+  local name="$1" default="$2" val
+  val="${!name:-}"
+  [[ -n "$val" ]] || val="$(read_env "$name")"
+  [[ -n "$val" ]] || val="$default"
+  printf '%s' "$val"
+}
+
+PUBLIC_API_BASE_VAL="$(resolve_default PUBLIC_API_BASE "https://chatnbook-api-664594784582.us-central1.run.app")"
+BUSINESS_TZ_VAL="$(resolve_default BUSINESS_TZ "America/New_York")"
+
+ENV_VARS="NODE_ENV=production"
+ENV_VARS="${ENV_VARS}@SEED_DEMO_ACCOUNT=acct_demo"
+ENV_VARS="${ENV_VARS}@PUBLIC_API_BASE=${PUBLIC_API_BASE_VAL}"
+ENV_VARS="${ENV_VARS}@BUSINESS_TZ=${BUSINESS_TZ_VAL}"
+ENV_VARS="${ENV_VARS}@AGENT_HMAC_SECRET=${AGENT_HMAC_SECRET}"
+ENV_VARS="${ENV_VARS}@TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}"
+ENV_VARS="${ENV_VARS}@ADMIN_API_KEY=${ADMIN_API_KEY}"
+
+# Pass these through only when actually set (real env or .env); omitting an
+# unset one means it's simply absent from the service's env, not wiped --
+# except on a *second* deploy, where --set-env-vars still replaces the
+# whole env set, so a value only ever set once via `gcloud run services
+# update` would be dropped by a later run of this script. Keep anything you
+# want to persist across deploys in .env.
+for k in DATABASE_URL GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REDIRECT_URI \
+  MS_CLIENT_ID MS_CLIENT_SECRET MS_REDIRECT_URI MS_TENANT; do
+  v="${!k:-}"
+  [[ -n "$v" ]] || v="$(read_env "$k")"
+  if [[ -n "$v" ]]; then
+    ENV_VARS="${ENV_VARS}@${k}=${v}"
+    echo "   config  : ${k} set (from env/.env)" >&2
+  fi
+done
+
+echo "──────────────────────────────────────────────────────────────"
+echo " chatnbook API → Cloud Run"
+echo "   project : $PROJECT"
+echo "   region  : $REGION"
+echo "   service : $SERVICE"
+echo "   source  : $REPO_ROOT (Dockerfile via Cloud Build)"
+echo "   secrets : AGENT_HMAC_SECRET, TOKEN_ENCRYPTION_KEY, ADMIN_API_KEY resolved (not printed)"
+echo "──────────────────────────────────────────────────────────────"
+
+echo "→ Setting active project"
+gcloud config set project "$PROJECT" >/dev/null
+
+echo "→ Enabling required APIs (run, cloudbuild) — idempotent"
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com \
+  --project "$PROJECT"
+
+echo "→ Deploying (this builds the image; first deploy takes a few minutes)"
+# --allow-unauthenticated : this is the public scheduling demo API.
+# --max-instances 1       : small demo workload; caps cost from any runaway
+#                           traffic/retry storm.
+# --min-instances 0       : scale-to-zero -- fine here since, with
+#                           DATABASE_URL unset, there's no warm state worth
+#                           keeping alive anyway (in-memory data resets on
+#                           every cold start regardless).
+# --memory 512Mi / --cpu 1: Express + a short-lived `python3 -m
+#                           connectors.cli` subprocess per calendar call;
+#                           no heavy in-process workload.
+# --port 3000             : matches the Dockerfile's EXPOSE/PORT default;
+#                           Cloud Run also injects PORT itself, which the
+#                           app reads (process.env.PORT) in preference to
+#                           any default.
+gcloud run deploy "$SERVICE" \
+  --source "$REPO_ROOT" \
+  --region "$REGION" \
+  --platform managed \
+  --allow-unauthenticated \
+  --max-instances 1 \
+  --min-instances 0 \
+  --memory 512Mi \
+  --cpu 1 \
+  --port 3000 \
+  --set-env-vars "^@^${ENV_VARS}"
+
+# ---------------------------------------------------------------------------
+# Report the URL and confirm the service is actually healthy.
+# ---------------------------------------------------------------------------
+URL="$(gcloud run services describe "$SERVICE" \
+  --region "$REGION" --format 'value(status.url)')"
+
+echo ""
+echo "──────────────────────────────────────────────────────────────"
+echo "✓ Deployed."
+echo "   Service URL : $URL"
+echo "→ Checking $URL/health"
+if curl -fsS "$URL/health"; then
+  echo ""
+  echo "✓ Health check OK."
+else
+  echo ""
+  echo "WARNING: health check failed -- check \`gcloud run services logs read $SERVICE --region $REGION\`" >&2
+fi
+echo "──────────────────────────────────────────────────────────────"

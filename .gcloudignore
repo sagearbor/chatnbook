@@ -1,0 +1,53 @@
+# Controls what `gcloud run deploy --source .` uploads to Cloud Build.
+# Providing this file means gcloud does NOT fall back to .gitignore, so
+# every exclusion the build actually needs has to be listed here explicitly.
+#
+# The Dockerfile's build stage runs `pnpm install --frozen-lockfile` and
+# `pnpm -r build` against the *uploaded* source, so this file must NOT
+# exclude pnpm-lock.yaml, pnpm-workspace.yaml, or any workspace
+# package.json. pnpm-workspace.yaml globs packages/*, packages/adapters/*,
+# tools/*, and platforms_out/*; today the only package.json files under
+# those globs are the repo root, packages/api, packages/widget, and
+# packages/adapters/mcp (tools/adapter-gen and platforms_out/wordpress-plugin
+# have none -- verified against pnpm-lock.yaml's `importers:` section, which
+# lists only those four). So excluding platforms_out/ and tools/**/test
+# below does not break the frozen-lockfile install; if a package.json is
+# ever added under platforms_out/* or tools/*, keep it out of the
+# exclusions (e.g. add `!platforms_out/wordpress-plugin/package.json`).
+#
+# packages/, tools/, infra/, and Dockerfile are all kept -- none of them are
+# excluded by anything below.
+
+# Secrets -- never upload local env files; real values are Cloud Run env
+# vars / Secret Manager, set by infra/deploy-cloudrun.sh.
+.env
+.env.*
+tmp/
+
+# VCS / editor / CI cruft not needed to build the image.
+.git/
+.github/
+.claude/
+.DS_Store
+
+# Build output -- regenerated fresh by `pnpm -r build` in the Dockerfile.
+node_modules/
+**/node_modules/
+**/dist/
+coverage/
+
+# Python: local venv + caches (see Dockerfile -- runtime deps are installed
+# fresh into /opt/venv; connectors-py's pytest/responses test deps are not
+# part of the runtime image).
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+**/*.egg-info/
+
+# Not needed to build/run the API image (see note above on why this is
+# safe for `pnpm install --frozen-lockfile`).
+platforms/
+platforms_out/
+docs/

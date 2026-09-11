@@ -38,6 +38,13 @@ curl http://localhost:3000/openapi.json
 - `agents/agent_instructions.yaml`: instructions file for AI dev bots.
 - `docs/mvp.md`: MVP definition and non-goals.
 
+## Deploy
+Build/run the API as a container (locally or via `docker compose`) and
+deploy it to Google Cloud Run with `infra/deploy-cloudrun.sh`. Env vars,
+the in-memory-vs-Postgres tradeoff, and attaching a database later are all
+covered in [`docs/DEPLOY.md`](docs/DEPLOY.md); see also `CLAUDE.md`'s
+Development Commands for the rest of the day-to-day command list.
+
 ## Testing
 We use `pytest` with the `pytest-testdox` plugin for readable output.
 

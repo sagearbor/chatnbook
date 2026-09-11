@@ -10,3 +10,21 @@ services:
   redis:
     image: redis:6
     ports: ['6379:6379']
+  # Builds and runs the production Dockerfile image against the dev
+  # db/redis above. Opt-in via a profile so plain `docker compose up -d`
+  # (used by other agents'/tests' db+redis) is unaffected -- start it with
+  # `docker compose -f infra/docker-compose.dev.yml --profile api up -d --build api`.
+  api:
+    profiles: ['api']
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    ports: ['3000:3000']
+    environment:
+      DATABASE_URL: postgres://user:pass@db:5432/smb
+      # Dev-only placeholder secrets -- never used outside this compose file.
+      AGENT_HMAC_SECRET: dev-hmac-secret-change-me
+      TOKEN_ENCRYPTION_KEY: jfwgiW/arJbnXMRnaeNWBVMKSPPbC2lqquyHr+E4Dx8=
+      SEED_DEMO_ACCOUNT: acct_demo
+    depends_on:
+      - db
