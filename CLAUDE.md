@@ -243,6 +243,32 @@ WordPress (or any) page embeds exactly
 ### Platform Generation
 The `tools/adapter-gen/` generates platform-specific wrappers from YAML manifests. WordPress is the primary target, with templates in `tools/adapter-gen/templates/wordpress/`.
 
+### WordPress plugin settings
+`platforms/wordpress.manifest.yaml`'s `injection.api_base` (currently the
+live Cloud Run deployment, `https://chatnbook-api-664594784582.us-central1.run.app`)
+and `injection.account_id` are baked into the generated plugin as the
+*defaults* for two WordPress options (`{slug}_api_base`, `{slug}_account_id`),
+not hardcoded endpoints -- a non-developer can repoint the plugin at their
+own server from **Settings -> AI SMB Booker** in wp-admin without touching
+code or regenerating anything. That settings page (generated from
+`tools/adapter-gen/templates/wordpress/includes/AdminPage.php.tmpl`) is a
+real WordPress Settings API page (`register_setting`/`add_options_page`,
+`esc_url_raw` + a strict `[A-Za-z0-9_-]{1,64}` sanitizer, `manage_options`
+capability, nonces via `settings_fields()`), and shows a read-only "Status"
+block with the exact `<script>` tag that will be injected and a link to
+`<api_base>/health`. `ScriptInjector` reads the options at request time
+(front end only, and only once `api_base` is non-empty) and `JsonLdRenderer`
+rewrites the baked JSON-LD's `urlTemplate`/`instrument` to the configured
+`api_base` at render time. `plugin.php`'s activation hook seeds the two
+options with `add_option()` (never overwrites an existing value on
+reactivate/update); `uninstall.php` removes them. Manifest's `script_url`
+and the JSON-LD's `urlTemplate`/`instrument` support a `${api_base}`
+template token that `tools/adapter-gen/index.ts` resolves against
+`injection.api_base` (validated as an http(s) URL) at generation time --
+see `tools/adapter-gen/test/generate.test.mjs` for the full contract
+(no `example.com` anywhere in generated output, `uninstall.php`/`readme.txt`
+present, `php -l` clean, zip contains `readme.txt`).
+
 ## Testing Strategy
 - **Python tests** in `packages/connectors-py/tests/` focus on availability math, DST handling, and calendar connector logic
 - **pytest-testdox** provides readable test output grouped by functionality

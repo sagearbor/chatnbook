@@ -6,6 +6,7 @@ Version: {{PLUGIN_VERSION}}
 Author: {{PLUGIN_AUTHOR}}
 Requires PHP: {{PLUGIN_MIN_PHP}}
 Text Domain: {{PLUGIN_SLUG}}
+Default script URL: {{SCRIPT_URL}}
 */
 
 if (!defined('ABSPATH')) exit;
@@ -14,5 +15,12 @@ require_once plugin_dir_path(__FILE__) . 'includes/AdminPage.php';
 require_once plugin_dir_path(__FILE__) . 'includes/JsonLdRenderer.php';
 require_once plugin_dir_path(__FILE__) . 'includes/ScriptInjector.php';
 
-register_activation_hook(__FILE__, function() { /* TODO: create options */ });
-register_deactivation_hook(__FILE__, function() { /* TODO: cleanup */ });
+register_activation_hook(__FILE__, function() {
+  // add_option() never overwrites an existing value, so reactivating the
+  // plugin (or updating it) never clobbers settings the site owner changed.
+  add_option('{{PLUGIN_SLUG}}_api_base', '{{API_BASE}}');
+  add_option('{{PLUGIN_SLUG}}_account_id', '{{ACCOUNT_ID}}');
+});
+register_deactivation_hook(__FILE__, function() {
+  // Nothing to clean up on deactivation; settings persist until uninstall.
+});

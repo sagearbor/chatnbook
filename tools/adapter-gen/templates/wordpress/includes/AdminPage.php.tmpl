@@ -1,12 +1,133 @@
 <?php
+if (!defined('ABSPATH')) exit;
+
 class AdminPage {
+  const OPTION_API_BASE = '{{PLUGIN_SLUG}}_api_base';
+  const OPTION_ACCOUNT_ID = '{{PLUGIN_SLUG}}_account_id';
+  const SETTINGS_GROUP = '{{PLUGIN_SLUG}}_settings';
+  const SETTINGS_PAGE = '{{PLUGIN_SLUG}}';
+  const DEFAULT_API_BASE = '{{API_BASE}}';
+  const DEFAULT_ACCOUNT_ID = '{{ACCOUNT_ID}}';
+
   public static function register() {
-    add_action('admin_menu', function() {
-      add_menu_page('{{PLUGIN_NAME}}', '{{PLUGIN_NAME}}', 'manage_options', '{{PLUGIN_SLUG}}', [self::class, 'render']);
-    });
+    add_action('admin_menu', [self::class, 'add_menu']);
+    add_action('admin_init', [self::class, 'register_settings']);
   }
+
+  public static function add_menu() {
+    add_options_page(
+      '{{PLUGIN_NAME}}',
+      '{{PLUGIN_NAME}}',
+      'manage_options',
+      self::SETTINGS_PAGE,
+      [self::class, 'render']
+    );
+  }
+
+  public static function register_settings() {
+    register_setting(self::SETTINGS_GROUP, self::OPTION_API_BASE, [
+      'type' => 'string',
+      'sanitize_callback' => 'esc_url_raw',
+      'default' => self::DEFAULT_API_BASE,
+    ]);
+    register_setting(self::SETTINGS_GROUP, self::OPTION_ACCOUNT_ID, [
+      'type' => 'string',
+      'sanitize_callback' => [self::class, 'sanitize_account_id'],
+      'default' => self::DEFAULT_ACCOUNT_ID,
+    ]);
+
+    add_settings_section(
+      '{{PLUGIN_SLUG}}_main_section',
+      __('Connection', '{{PLUGIN_SLUG}}'),
+      '__return_false',
+      self::SETTINGS_PAGE
+    );
+
+    add_settings_field(
+      self::OPTION_API_BASE,
+      __('API base URL', '{{PLUGIN_SLUG}}'),
+      [self::class, 'render_api_base_field'],
+      self::SETTINGS_PAGE,
+      '{{PLUGIN_SLUG}}_main_section'
+    );
+
+    add_settings_field(
+      self::OPTION_ACCOUNT_ID,
+      __('Account ID', '{{PLUGIN_SLUG}}'),
+      [self::class, 'render_account_id_field'],
+      self::SETTINGS_PAGE,
+      '{{PLUGIN_SLUG}}_main_section'
+    );
+  }
+
+  // Strict allow-list: letters, digits, underscore, hyphen, 1-64 chars.
+  public static function sanitize_account_id($value) {
+    $value = trim((string) $value);
+    if (preg_match('/^[A-Za-z0-9_-]{1,64}$/', $value)) {
+      return $value;
+    }
+    add_settings_error(
+      self::OPTION_ACCOUNT_ID,
+      '{{PLUGIN_SLUG}}_account_id_invalid',
+      __('Account ID must be 1-64 characters: letters, numbers, underscore or hyphen. Keeping the previous value.', '{{PLUGIN_SLUG}}')
+    );
+    return get_option(self::OPTION_ACCOUNT_ID, self::DEFAULT_ACCOUNT_ID);
+  }
+
+  public static function get_api_base() {
+    return get_option(self::OPTION_API_BASE, self::DEFAULT_API_BASE);
+  }
+
+  public static function get_account_id() {
+    return get_option(self::OPTION_ACCOUNT_ID, self::DEFAULT_ACCOUNT_ID);
+  }
+
+  public static function build_script_url($api_base) {
+    return rtrim($api_base, '/') . '/widget.js';
+  }
+
+  public static function render_api_base_field() {
+    $value = self::get_api_base();
+    echo '<input type="url" class="regular-text" name="' . esc_attr(self::OPTION_API_BASE) . '" value="' . esc_attr($value) . '" placeholder="https://your-chatnbook-server.com" />';
+    echo '<p class="description">' . esc_html__('API base URL of your chatnbook server', '{{PLUGIN_SLUG}}') . '</p>';
+  }
+
+  public static function render_account_id_field() {
+    $value = self::get_account_id();
+    echo '<input type="text" class="regular-text" name="' . esc_attr(self::OPTION_ACCOUNT_ID) . '" value="' . esc_attr($value) . '" placeholder="acct_demo" />';
+    echo '<p class="description">' . esc_html__('Your account ID', '{{PLUGIN_SLUG}}') . '</p>';
+  }
+
   public static function render() {
-    echo '<div class="wrap"><h1>{{PLUGIN_NAME}}</h1><p>Connect Google/Microsoft and configure services.</p></div>';
+    if (!current_user_can('manage_options')) {
+      return;
+    }
+
+    $api_base = self::get_api_base();
+    $account_id = self::get_account_id();
+
+    echo '<div class="wrap">';
+    echo '<h1>' . esc_html__('{{PLUGIN_NAME}}', '{{PLUGIN_SLUG}}') . '</h1>';
+    echo '<form method="post" action="options.php">';
+    settings_fields(self::SETTINGS_GROUP);
+    do_settings_sections(self::SETTINGS_PAGE);
+    submit_button();
+    echo '</form>';
+
+    echo '<h2>' . esc_html__('Status', '{{PLUGIN_SLUG}}') . '</h2>';
+    echo '<table class="widefat" style="max-width:640px"><tbody>';
+
+    if (!empty($api_base)) {
+      $script_tag = '<script src="' . esc_url(self::build_script_url($api_base)) . '" data-account="' . esc_attr($account_id) . '" async></script>';
+      $health_url = esc_url(rtrim($api_base, '/') . '/health');
+      echo '<tr><th scope="row">' . esc_html__('Injected script tag', '{{PLUGIN_SLUG}}') . '</th><td><code>' . esc_html($script_tag) . '</code></td></tr>';
+      echo '<tr><th scope="row">' . esc_html__('Health check', '{{PLUGIN_SLUG}}') . '</th><td><a href="' . $health_url . '" target="_blank" rel="noopener noreferrer">' . esc_html($health_url) . '</a></td></tr>';
+    } else {
+      echo '<tr><td colspan="2">' . esc_html__('Set an API base URL above to enable the booking widget.', '{{PLUGIN_SLUG}}') . '</td></tr>';
+    }
+
+    echo '</tbody></table>';
+    echo '</div>';
   }
 }
 AdminPage::register();

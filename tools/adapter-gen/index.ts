@@ -18,7 +18,9 @@ interface JsonLdManifest {
 }
 
 interface InjectionManifest {
-  script_url: string;
+  api_base?: string;
+  account_id?: string;
+  script_url?: string;
   jsonld?: JsonLdManifest;
 }
 
@@ -60,11 +62,76 @@ function escapePhpSingleQuoted(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
+function isHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+// Recursively substitutes the literal token "${api_base}" inside every string
+// value of a (possibly nested) JSON-LD structure with the resolved api_base.
+function resolveApiBaseTemplate(value: unknown, apiBase: string): unknown {
+  if (typeof value === 'string') {
+    return value.split('${api_base}').join(apiBase);
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => resolveApiBaseTemplate(v, apiBase));
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = resolveApiBaseTemplate(v, apiBase);
+    }
+    return out;
+  }
+  return value;
+}
+
+function resolveInjection(injection: InjectionManifest): {
+  apiBase: string;
+  accountId: string;
+  scriptUrl: string;
+  jsonld: JsonLdManifest;
+} {
+  let apiBase = '';
+  if (injection.api_base !== undefined) {
+    if (typeof injection.api_base !== 'string' || !isHttpUrl(injection.api_base)) {
+      console.error(
+        `injection.api_base must be an http(s) URL, got: ${JSON.stringify(injection.api_base)}`
+      );
+      process.exit(1);
+    }
+    apiBase = injection.api_base;
+  }
+
+  const accountId = injection.account_id || '';
+
+  let scriptUrlRaw = injection.script_url;
+  if (!scriptUrlRaw) {
+    if (!apiBase) {
+      console.error('injection.script_url is required when injection.api_base is not set');
+      process.exit(1);
+    }
+    scriptUrlRaw = '${api_base}/widget.js';
+  }
+  const scriptUrl = apiBase ? scriptUrlRaw.split('${api_base}').join(apiBase) : scriptUrlRaw;
+
+  const jsonldRaw: JsonLdManifest =
+    injection.jsonld || { '@context': 'https://schema.org', '@type': 'LocalBusiness' };
+  const jsonld = (
+    apiBase ? resolveApiBaseTemplate(jsonldRaw, apiBase) : jsonldRaw
+  ) as JsonLdManifest;
+
+  return { apiBase, accountId, scriptUrl, jsonld };
+}
+
 function placeholders(manifest: Manifest): Record<string, string> {
   const { plugin, injection } = manifest;
-  const jsonld = injection.jsonld
-    ? JSON.stringify(injection.jsonld, null, 2)
-    : JSON.stringify({ '@context': 'https://schema.org', '@type': 'LocalBusiness' }, null, 2);
+  const resolved = resolveInjection(injection);
+  const jsonld = JSON.stringify(resolved.jsonld, null, 2);
 
   // Indent the JSON-LD default so it reads cleanly as a PHP array literal comment/fallback.
   return {
@@ -74,7 +141,9 @@ function placeholders(manifest: Manifest): Record<string, string> {
     PLUGIN_DESCRIPTION: plugin.description,
     PLUGIN_AUTHOR: plugin.author || 'Unknown',
     PLUGIN_MIN_PHP: (plugin.php || '7.4').replace(/^[^\d]*/, ''),
-    SCRIPT_URL: escapePhpSingleQuoted(injection.script_url),
+    API_BASE: escapePhpSingleQuoted(resolved.apiBase),
+    ACCOUNT_ID: escapePhpSingleQuoted(resolved.accountId),
+    SCRIPT_URL: escapePhpSingleQuoted(resolved.scriptUrl),
     JSONLD_DEFAULT_JSON: jsonld,
   };
 }
@@ -105,3 +174,4 @@ const values = placeholders(manifest);
 copyDir(src, dest, values);
 console.log('Generated WordPress plugin at', dest);
 console.log('  slug:', values.PLUGIN_SLUG, ' version:', values.PLUGIN_VERSION);
+console.log('  api_base:', values.API_BASE || '(none)', ' account_id:', values.ACCOUNT_ID || '(none)');
