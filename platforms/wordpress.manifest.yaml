@@ -4,13 +4,15 @@ language: php
 plugin:
   slug: ai-smb-booker
   name: AI SMB Booker
-  version: 0.1.0
+  version: 0.2.0
   description: Injects booking widget and JSON-LD and handles OAuth setup.
   author: Chatnbook Team
   php: ">=7.4"
 
 injection:
-  script_url: https://cdn.example.com/widget.js
+  api_base: https://chatnbook-api-664594784582.us-central1.run.app
+  account_id: acct_demo
+  script_url: "${api_base}/widget.js"
   jsonld:
     "@context": https://schema.org
     "@type": LocalBusiness
@@ -18,7 +20,7 @@ injection:
       "@type": ScheduleAction
       target:
         "@type": EntryPoint
-        urlTemplate: https://api.example.com/v1/appointments
+        urlTemplate: "${api_base}/v1/public/appointments"
         httpMethod: POST
         encodingType: application/json
-      instrument: https://api.example.com/openapi.json
+      instrument: "${api_base}/openapi.json"

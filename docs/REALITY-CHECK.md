@@ -105,6 +105,35 @@ install) so the results reflect what a new contributor would actually hit.
 > probably an `api` service block in a compose file) before containerized
 > build/run can be verified at all.
 
+> **Update — 2026-09-11:** the WordPress plugin no longer bakes in the
+> `https://cdn.example.com/widget.js` / `https://api.example.com` placeholders
+> flagged in the "Bottom line" table below. `platforms/wordpress.manifest.yaml`
+> now points `injection.api_base` at the real deployed API
+> (`https://chatnbook-api-664594784582.us-central1.run.app`, live as of
+> tonight's deploy) and `injection.account_id` at `acct_demo`; the widget
+> script URL and the JSON-LD `urlTemplate`/`instrument` are derived from
+> `api_base` (`${api_base}/widget.js`, `${api_base}/v1/public/appointments`,
+> `${api_base}/openapi.json`) rather than hardcoded. More importantly, a
+> non-developer is no longer stuck with whatever URL was baked in at
+> generation time: the plugin now has a real Settings API page (Settings ->
+> AI SMB Booker in wp-admin) where the API base URL and account ID can be
+> changed after install, with sanitization (`esc_url_raw`, a strict
+> `[A-Za-z0-9_-]{1,64}` account-id check), `manage_options` capability, and
+> nonces via `settings_fields()`. `ScriptInjector` and `JsonLdRenderer` both
+> read the live option values (falling back to the manifest defaults) at
+> render time instead of only ever seeing what was baked in at generation
+> time. Added `uninstall.php` (removes both options) and a WordPress-format
+> `readme.txt`. Verified: `pnpm test:adapter-gen` (generate -> assert no
+> `example.com` anywhere in `platforms_out/wordpress-plugin`, assert the
+> live API base/account id are baked in as defaults, `php -l` on every
+> `.php` file including the new `uninstall.php`, zip contains `readme.txt`)
+> all green; `pnpm package:wordpress` builds a non-empty zip. Still
+> unaddressed: no real OAuth connect flow from the settings page (out of
+> scope for this task -- it only adds the two connection settings), and the
+> widget script served at `/widget.js` still needs its own end-to-end
+> verification (out of scope here; this task only changed what URL the
+> plugin points at).
+
 ## TL;DR
 
 - **The Python calendar-connector library and the WordPress plugin
@@ -410,7 +439,7 @@ would break immediately. Fixed by quoting that one title.
 | Requirement | Reality |
 |---|---|
 | Hosted API with Postgres+Redis, HTTPS | Not hosted (still true). Postgres/Redis containers work locally but the API doesn't use them. *(stale -- see note above: the API does use Postgres now)* |
-| WP plugin a non-developer can install, real booking against Google Calendar | Plugin now generates/installs/activates cleanly (verified above). It renders a **stub** widget URL and stub JSON-LD; the API behind it doesn't create real Google Calendar events — `/v1/appointments` only writes to an in-memory Map. *(stale -- see note above: the API does create/delete real Google Calendar events now; the widget URL and JSON-LD API URL in the WordPress manifest are still placeholders, which is accurate)* |
+| WP plugin a non-developer can install, real booking against Google Calendar | Plugin now generates/installs/activates cleanly (verified above). It renders a **stub** widget URL and stub JSON-LD; the API behind it doesn't create real Google Calendar events — `/v1/appointments` only writes to an in-memory Map. *(stale -- see notes above: the API does create/delete real Google Calendar events now; and as of the 2026-09-11 note, the widget URL and JSON-LD API URL are no longer placeholders -- the manifest points at the live deployed API and a non-developer can repoint them from Settings -> AI SMB Booker in wp-admin without regenerating the plugin)* |
 | Stripe Checkout | No billing code exists; `.env.example` has unused Stripe var names only. (still true) |
 | One pilot customer | N/A — nothing is live to pilot. (still true) |
 
