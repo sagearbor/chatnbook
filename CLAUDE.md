@@ -91,6 +91,18 @@ which is how `packages/api/test/oauth-flow.test.js` points the whole flow
 at a local mock OAuth provider (`test/helpers/mock-oauth-provider.mjs`)
 instead of the real thing -- no real client ids/secrets needed to test it.
 
+### Services
+`GET /v1/services?accountId=...` lists real services (id, accountId, name,
+durationMinutes, bufferMinutes) backed by Postgres/in-memory (see
+`packages/api/src/repositories/services-repo.ts` and
+`migrations/003_create_services.sql`). accountId is required. There's no
+admin HTTP endpoint to create a service yet -- seed rows directly through
+the repository (see `getServicesRepoForTest()` in `src/index.ts`, used by
+`test/services.test.js`). `GET /v1/availability` honours a `serviceId`
+query param by looking the service up (404 if unknown, 400 if it belongs
+to a different account) and using its `durationMinutes + bufferMinutes` as
+the slot length, overriding any client-supplied `slotMinutes`.
+
 ### Calendar connector wiring (availability + event creation)
 `POST /v1/appointments` and `GET /v1/availability` call the Python
 connectors (`packages/connectors-py`) through `CalendarConnector`
@@ -106,22 +118,52 @@ Postgres only, no calendar call) -- required because
   account's stored OAuth token, calls the connector's `getBusy` to check
   for conflicts (409 if the slot overlaps an existing busy interval), then
   `createEvent` to create the real calendar event, storing the result as
-  `provider_event_id` on the appointment row. The idempotency-key replay
-  check happens *before* any of this, so retries never touch the
-  calendar.
+  `provider_event_id` (plus `provider`/`calendar_id`, needed later for
+  cancellation) on the appointment row. The idempotency-key replay check
+  happens *before* any of this, so retries never touch the calendar -- and
+  a DB-level claim (see "Idempotency-key concurrency" below) closes the
+  remaining race where two truly concurrent first requests could otherwise
+  both reach the calendar.
+- `POST /v1/appointments/:id/cancel`: when the appointment has a stored
+  `provider`/`calendar_id`/`provider_event_id`, calls the connector's
+  `deleteEvent` to remove the real calendar event before marking the
+  appointment canceled. Tolerates the event already being gone (a
+  duplicate cancel, or someone deleting it directly on the provider) --
+  `google.delete_event`/`microsoft.delete_event` treat a 404/410 from the
+  provider as success rather than raising, so this never blocks
+  cancellation. Appointments booked with no `provider` are unaffected (the
+  calendar is never touched, exactly as before this existed).
 - `GET /v1/availability` with `accountId`/`provider`/`calendarId`/`start`/`end`
   all set: calls `getBusy` then `computeAvailability` (wrapping
   `packages/connectors-py/src/connectors/availability.py`) to return real
-  free slots; falls back to `{ slots: [] }` when they're not all given.
-- Tests: `packages/api/test/appointments-connector.test.js` injects a fake
-  `CalendarConnector` via `setCalendarConnectorForTest` (never spawns
-  python). `packages/api/test/appointments-connector-integration.test.js`
-  is the one real integration test -- it leaves the real
-  `PythonCalendarConnector` in place and points
-  `google.py`'s `GOOGLE_CALENDAR_API_BASE` at a fake Google Calendar HTTP
-  backend (`test/helpers/fake-calendar-backend.mjs`), so it's a genuine
-  end-to-end exercise of TS -> subprocess -> Python -> HTTP -> fake
-  Google API.
+  free slots; falls back to `{ slots: [] }` when they're not all given. A
+  `serviceId` query param (see "Services" above) overrides the slot length
+  with that service's own duration + buffer.
+- Tests: `packages/api/test/appointments-connector.test.js` and
+  `test/appointments-cancel-connector.test.js` inject a fake
+  `CalendarConnector` via `setCalendarConnectorForTest` (never spawn
+  python). `test/appointments-connector-integration.test.js` and
+  `test/appointments-cancel-connector-integration.test.js` are the real
+  integration tests -- they leave the real `PythonCalendarConnector` in
+  place and point `google.py`'s `GOOGLE_CALENDAR_API_BASE` at a fake
+  Google Calendar HTTP backend (`test/helpers/fake-calendar-backend.mjs`,
+  which also implements DELETE), so they're a genuine end-to-end exercise
+  of TS -> subprocess -> Python -> HTTP -> fake Google API, including the
+  already-deleted-event tolerance path.
+
+### Idempotency-key concurrency
+Two concurrent *first* `POST /v1/appointments` requests sharing the same
+`Idempotency-Key` are guarded at the DB level, not just by the
+idempotency_key unique constraint on the `appointments` table itself:
+before doing any calendar work, a request must win an atomic claim
+(`appointmentsRepo.tryClaim`, backed by a unique constraint on a small
+`idempotency_claims` table -- `migrations/005_create_idempotency_claims.sql`).
+Only the winner calls the calendar connector; the loser polls briefly for
+the winner's row (`releaseClaim` always runs, success or failure, so a
+genuine retry after a failure can claim the key again). See
+`test/idempotency-concurrency.test.js` for a real-Postgres test that fires
+two genuinely concurrent requests and asserts exactly one calendar event
+and one DB row are created.
 
 ### Health Checks
 ```bash

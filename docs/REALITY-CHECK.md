@@ -49,6 +49,62 @@ install) so the results reflect what a new contributor would actually hit.
 > the way Google's is (see `plan.yaml` P2-2); nothing is deployed/hosted.
 > See the newest `tmp/wrapups/*.yaml`.
 
+> **Update — 2026-09-10:** three more gaps flagged above are now
+> addressed. (1) `/v1/services` is a real table now (`services`, see
+> `migrations/003_create_services.sql` and
+> `packages/api/src/repositories/services-repo.ts`, same Pg/in-memory
+> split as everything else here) -- `GET /v1/services?accountId=...`
+> returns real rows (`id`, `accountId`, `name`, `durationMinutes`,
+> `bufferMinutes`), and `GET /v1/availability` honours a `serviceId` query
+> param by looking the service up and using its `durationMinutes +
+> bufferMinutes` as the slot length (404 for an unknown serviceId, 400 if
+> it belongs to a different account) instead of trusting an arbitrary
+> client-supplied `slotMinutes`. There's still no admin HTTP endpoint to
+> *create* a service (out of scope; tests seed rows directly via
+> `getServicesRepoForTest()`). (2) `POST /v1/appointments/:id/cancel` now
+> deletes the real calendar event when one was created: added
+> `deleteEvent` to `CalendarConnector` (and to the Python side --
+> `google.delete_event` / `microsoft.delete_event`, wired through
+> `cli.py`'s new `delete_event` action), which tolerates the event already
+> being gone (404/410 from the provider) by resolving normally instead of
+> raising, so a duplicate/late cancel never errors. `appointments` gained
+> `provider`/`calendar_id` columns (`migrations/004_add_appointments_provider_calendar.sql`)
+> so cancel knows what to delete. Verified with both mocked-connector unit
+> tests (`test/appointments-cancel-connector.test.js`) and a real
+> integration test against the fake Google Calendar HTTP backend
+> (`test/appointments-cancel-connector-integration.test.js`, extended
+> `test/helpers/fake-calendar-backend.mjs` with a DELETE endpoint) that
+> creates a real event via the real Python connector, cancels it, confirms
+> it's gone from the fake backend, then cancels *again* and confirms the
+> already-deleted case is tolerated end to end. (3) Closed the idempotency-key
+> race documented just below the TL;DR table: two concurrent *first*
+> requests with the same `Idempotency-Key` used to both pass the
+> pre-existing replay check and both reach the calendar connector, so a
+> race could create two real calendar events for one logical booking. Fixed
+> with a DB-level guard -- `appointmentsRepo.tryClaim`/`releaseClaim`,
+> backed by a unique constraint on a new `idempotency_claims` table
+> (`migrations/005_create_idempotency_claims.sql`) -- so only the request
+> that wins the atomic claim does the calendar work; the loser polls for
+> the winner's row instead of duplicating it. Verified against real
+> Postgres with two genuinely concurrent `fetch()` calls sharing one key
+> and an artificially slow fake connector
+> (`test/idempotency-concurrency.test.js`): exactly one calendar event and
+> one DB row are created, and a claim that's never released (simulating a
+> crashed winner) correctly times out to a 409 rather than double-booking.
+> `pnpm test` (all suites, Python + every TS package) is green. Still
+> unaddressed: ICS wiring, hosting/deployment, Stripe, and account
+> creation (all explicitly out of scope for this round). **New finding:**
+> there is still no `Dockerfile` for `packages/api` anywhere in the repo,
+> and `infra/docker-compose.dev.yml` only provisions Postgres + Redis -- it
+> does not build or run the API itself. So there is currently no "API
+> container" a compose file can build/run end to end; verified instead
+> that `packages/api`'s compiled `dist/index.js` runs correctly as a plain
+> Node process against the real compose-provisioned Postgres (migrated,
+> `/health`, `/v1/services`, `/v1/availability` all responded correctly).
+> A future deploy task needs to add a `Dockerfile` for `packages/api` (and
+> probably an `api` service block in a compose file) before containerized
+> build/run can be verified at all.
+
 ## TL;DR
 
 - **The Python calendar-connector library and the WordPress plugin
@@ -342,12 +398,21 @@ would break immediately. Fixed by quoting that one title.
 
 ## Bottom line for `chatnbook.md`'s "Definition of shipped"
 
+> **This table is from the original 2026-09-08 pass and is now stale on
+> the first two rows** -- see the 2026-09-08 and 2026-09-10 update notes
+> above the TL;DR for what's actually true today (Postgres is genuinely
+> used for appointments/OAuth tokens/services/idempotency claims; real
+> Google/Microsoft calendar events are created and deleted through the
+> Python connectors). Left as-is rather than rewritten so the history of
+> what was found when is preserved; don't act on these two rows without
+> reading the updates above first.
+
 | Requirement | Reality |
 |---|---|
-| Hosted API with Postgres+Redis, HTTPS | Not hosted. Postgres/Redis containers work locally but the API doesn't use them. |
-| WP plugin a non-developer can install, real booking against Google Calendar | Plugin now generates/installs/activates cleanly (verified above). It renders a **stub** widget URL and stub JSON-LD; the API behind it doesn't create real Google Calendar events — `/v1/appointments` only writes to an in-memory Map. |
-| Stripe Checkout | No billing code exists; `.env.example` has unused Stripe var names only. |
-| One pilot customer | N/A — nothing is live to pilot. |
+| Hosted API with Postgres+Redis, HTTPS | Not hosted (still true). Postgres/Redis containers work locally but the API doesn't use them. *(stale -- see note above: the API does use Postgres now)* |
+| WP plugin a non-developer can install, real booking against Google Calendar | Plugin now generates/installs/activates cleanly (verified above). It renders a **stub** widget URL and stub JSON-LD; the API behind it doesn't create real Google Calendar events — `/v1/appointments` only writes to an in-memory Map. *(stale -- see note above: the API does create/delete real Google Calendar events now; the widget URL and JSON-LD API URL in the WordPress manifest are still placeholders, which is accurate)* |
+| Stripe Checkout | No billing code exists; `.env.example` has unused Stripe var names only. (still true) |
+| One pilot customer | N/A — nothing is live to pilot. (still true) |
 
 Estimate of remaining work to reach "useful enough to sell" is unchanged
 from `chatnbook.md`'s prior estimate (35-40%) for the API/booking side;

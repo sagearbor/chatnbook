@@ -50,6 +50,43 @@ class TestCliHandlers:
         })
         assert result == {"eventId": "evt_9"}
 
+    @responses.activate
+    def test_delete_event_google(self):
+        """delete_event dispatches to the google connector and returns an empty result."""
+        responses.add(
+            responses.DELETE,
+            "https://www.googleapis.com/calendar/v3/calendars/cal1/events/evt_9",
+            status=204,
+        )
+        result = cli.handle_delete_event({
+            "provider": "google", "token": "tok", "calendarId": "cal1", "eventId": "evt_9",
+        })
+        assert result == {}
+
+    @responses.activate
+    def test_delete_event_tolerates_already_deleted(self):
+        """A 404 from the provider is tolerated -- delete_event still
+        reports ok: true, not an error, when replayed through the CLI."""
+        responses.add(
+            responses.DELETE,
+            "https://www.googleapis.com/calendar/v3/calendars/cal1/events/evt_gone",
+            status=404,
+        )
+        result = cli.handle_delete_event({
+            "provider": "google", "token": "tok", "calendarId": "cal1", "eventId": "evt_gone",
+        })
+        assert result == {}
+
+    def test_delete_event_unsupported_provider_raises(self):
+        """ics (read-only) doesn't support delete_event -- raises ValueError
+        so main() reports ok: false rather than crashing."""
+        try:
+            cli.handle_delete_event({"provider": "ics", "token": "tok", "calendarId": "c", "eventId": "e"})
+        except ValueError as exc:
+            assert "ics" in str(exc)
+        else:
+            raise AssertionError("expected ValueError")
+
     def test_compute_availability_excludes_busy(self):
         """compute_availability returns free slots, skipping busy ones."""
         result = cli.handle_compute_availability({

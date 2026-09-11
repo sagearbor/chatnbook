@@ -31,6 +31,13 @@ export interface CreateEventParams {
   summary: string;
 }
 
+export interface DeleteEventParams {
+  provider: 'google' | 'microsoft';
+  token: string;
+  calendarId: string;
+  eventId: string;
+}
+
 export interface AvailabilitySlot {
   start: string; // ISO-8601
   end: string; // ISO-8601
@@ -46,6 +53,13 @@ export interface ComputeAvailabilityParams {
 export interface CalendarConnector {
   getBusy(params: GetBusyParams): Promise<BusyInterval[]>;
   createEvent(params: CreateEventParams): Promise<{ eventId: string }>;
+  /** Deletes a real calendar event, e.g. on POST /v1/appointments/:id/cancel
+   * (see index.ts). Implementations MUST tolerate the event already being
+   * gone (already deleted directly on the provider, or a stale id) by
+   * resolving normally instead of throwing -- see
+   * packages/connectors-py/src/connectors/google.py and microsoft.py's
+   * delete_event, which treat a 404/410 from the provider as success. */
+  deleteEvent(params: DeleteEventParams): Promise<void>;
   computeAvailability(params: ComputeAvailabilityParams): Promise<AvailabilitySlot[]>;
 }
 
