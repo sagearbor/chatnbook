@@ -50,7 +50,9 @@ COPY . .
 RUN pnpm -r build \
  && test -f packages/api/dist/api/src/index.js \
  && test -f packages/widget/dist/loader.js \
- && test -f packages/widget/dist/app.js
+ && test -f packages/widget/dist/app.js \
+ && test -f packages/widget/dist/main.js \
+ && test -f packages/widget/dist/app.html
 
 # Produce a clean, production-only copy of @smb/api: its compiled dist/,
 # migrations/, scripts/, openapi/ and package.json, plus a fresh
