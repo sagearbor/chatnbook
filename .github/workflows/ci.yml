@@ -29,6 +29,7 @@ jobs:
   # `pnpm test` runs locally (see CLAUDE.md's Testing section).
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     services:
       postgres:
         image: postgres:14
