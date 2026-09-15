@@ -1,0 +1,147 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  # Deliberately NOT setting DATABASE_URL here: packages/api's repository
+  # backend is selected by whether DATABASE_URL is set (see
+  # packages/api/src/index.ts), and most test files are designed to run
+  # against the fast in-memory repository -- only the handful of dedicated
+  # Postgres integration tests (appointments-postgres.test.js and friends)
+  # set their own DATABASE_URL default (matching the `postgres` service
+  # container below) themselves, once imported inside their own process.
+  # Exporting DATABASE_URL globally here would force *every* test file
+  # (including ones with zero Postgres awareness) onto the same real
+  # Postgres pool -- a documented gotcha (see this repo's
+  # tmp/wrapups/20260911-0338-*.yaml) that breaks unrelated files like
+  # openapi-discovery.test.js, which closes its repositories more than
+  # once assuming an in-memory (no-op close) backend.
+  AGENT_HMAC_SECRET: ci-hmac-secret
+  TOKEN_ENCRYPTION_KEY: 5eD2QwlZ0V0Q2vXJ0v3wQe8y1nQe8y1nQe8y1nQe8y0=
+
+jobs:
+  # Python connectors/availability tests + the full TS suite (unit tests,
+  # plus the Postgres integration tests against the service container
+  # below) + the WordPress adapter generator tests -- the same three steps
+  # `pnpm test` runs locally (see CLAUDE.md's Testing section).
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: pass
+          POSTGRES_DB: smb
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U user -d smb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install pnpm workspace deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Python connector deps
+        run: pip install -r packages/connectors-py/requirements.txt
+
+      - name: Build all packages
+        run: pnpm -r build
+
+      - name: Migrate Postgres
+        run: pnpm --filter @smb/api db:migrate
+        env:
+          DATABASE_URL: postgres://user:pass@localhost:5432/smb
+
+      - name: Full test suite (pytest + TS + adapter-gen)
+        run: pnpm test
+
+  # Browser-surface regression: loads the live-built widget bundle (a real
+  # @smb/api server + packages/widget/dist, not jsdom) in Chromium and
+  # completes a booking end to end. Added after the 2026-09-12 deploy round
+  # found a bug (an unmounted widget) that every jsdom-based unit test
+  # missed silently -- see packages/widget/test/e2e/booking.spec.ts and
+  # playwright.config.ts.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install pnpm workspace deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        working-directory: packages/widget
+        run: npx playwright install --with-deps chromium
+
+      - name: Booking E2E (builds api+widget, then runs Playwright)
+        working-directory: packages/widget
+        run: pnpm run test:e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: packages/widget/playwright-report/
+          retention-days: 7
+
+  # Firestore-backed repositories against a real Firestore emulator (not
+  # against production Firestore -- the emulator uses the fake
+  # "demo-chatnbook" project id, no GCP credentials needed). See
+  # docs/DEPLOY.md's "Repository backend selection" section.
+  firestore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install pnpm workspace deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Install firebase-tools
+        run: npm install -g firebase-tools
+
+      - name: Firestore emulator tests
+        run: pnpm run test:firestore

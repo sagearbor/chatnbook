@@ -6,9 +6,12 @@
     "build": "tsc -p tsconfig.json && node scripts/strip-loader-export.js && node scripts/copy-static.js",
     "dev": "ts-node src/loader.ts",
     "pretest": "npm run build",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "pretest:e2e": "pnpm --filter @smb/api build && npm run build",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.47.0",
     "jsdom": "^24.0.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.5.4"

@@ -59,6 +59,14 @@ interface CliResponse<T> {
   error?: string;
 }
 
+/** Max time to wait for the python subprocess to answer, in ms. Without
+ * this, a python process that hangs (network stall inside requests,
+ * unexpected prompt, etc.) leaves the returned promise pending forever --
+ * this surfaced for real as an indefinitely-hung CI job, not just a
+ * theoretical risk. Overridable for tests that deliberately want to
+ * exercise the timeout path quickly. */
+const CLI_TIMEOUT_MS = Number(process.env.CONNECTORS_PY_TIMEOUT_MS) || 20_000;
+
 function runCli<T>(request: Record<string, unknown>): Promise<T> {
   return new Promise((resolve, reject) => {
     const child = spawn(pythonBin(), ['-m', 'connectors.cli'], {
@@ -68,14 +76,36 @@ function runCli<T>(request: Record<string, unknown>): Promise<T> {
 
     let stdout = '';
     let stderr = '';
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill('SIGKILL');
+      reject(
+        new ConnectorError(
+          `python connector timed out after ${CLI_TIMEOUT_MS}ms (stderr so far: ${stderr.trim() || '<empty>'})`
+        )
+      );
+    }, CLI_TIMEOUT_MS);
+    // Don't let this timer keep the process alive if everything else has
+    // already finished (e.g. a test runner exiting between assertions).
+    timer.unref?.();
+
     child.stdout.on('data', (chunk) => (stdout += chunk));
     child.stderr.on('data', (chunk) => (stderr += chunk));
 
     child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       reject(new ConnectorError(`failed to spawn python connector: ${err.message}`));
     });
 
     child.on('close', () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       let parsed: CliResponse<T>;
       try {
         parsed = JSON.parse(stdout);

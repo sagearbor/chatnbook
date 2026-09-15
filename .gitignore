@@ -10,3 +10,10 @@ __pycache__/
 package-lock.json
 platforms_out/*.zip
 tmp/
+firestore-debug.log
+firebase-debug.log
+ui-debug.log
+.firebase/
+playwright-report/
+test-results/
+/packages/widget/.playwright-cache/

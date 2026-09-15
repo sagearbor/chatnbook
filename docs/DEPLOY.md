@@ -94,22 +94,61 @@ stable across future deploys. It prints the deployed service URL and curls
 Prerequisites: `gcloud` installed and authenticated (`gcloud auth login`),
 and a GCP project with billing enabled. The script does not create either.
 
-## In-memory mode (default demo config)
+## Repository backend selection
 
-With `DATABASE_URL` unset, `@smb/api` falls back to its in-memory
-repositories (`packages/api/src/repositories/memory-*.ts`) instead of
-Postgres. **This is the mode the Cloud Run demo instance runs in by
-default.** It means:
+`packages/api/src/index.ts` picks a repository backend at startup, in this
+priority order (first one set wins):
 
-- No database to provision or migrate for the demo.
-- **All data resets on every cold start** (and on every deploy/restart) --
-  appointments, OAuth tokens, and services are held only in the running
-  process's memory.
+1. **`DATABASE_URL` set -> Postgres** (`packages/api/src/repositories/pg-*.ts`).
+2. **`FIRESTORE_PROJECT_ID` set -> Firestore**, Native mode
+   (`packages/api/src/repositories/firestore-*.ts`). **This is the mode the
+   Cloud Run demo instance runs in.** Free tier, no database to provision
+   or migrate -- arborfam-hub already has a Firestore Native database
+   (created 2026-08-01). Unlike in-memory, data survives a cold start.
+3. **Neither set -> in-memory** (`memory-*.ts`). All data resets on every
+   cold start/deploy/restart. Used by the default `pnpm test` unit-test
+   run so it needs neither Docker nor a GCP project.
 
-## Attaching a real Postgres later
+The startup log prints one line (`repository backend: firestore` /
+`postgres` / `in-memory`) so `gcloud run services logs read` can confirm
+which one an instance actually picked.
 
-To move a deployed instance off in-memory storage, provision a Postgres
-(e.g. Cloud SQL) and point `DATABASE_URL` at it:
+### Firestore mode
+
+```bash
+gcloud run services update chatnbook-api --region us-central1 \
+  --update-env-vars FIRESTORE_PROJECT_ID=arborfam-hub
+```
+
+Or set `FIRESTORE_PROJECT_ID=arborfam-hub` in repo-root `.env` before
+running `infra/deploy-cloudrun.sh` -- it passes the var through like
+`DATABASE_URL` (see below). No credentials are needed: the Cloud Run
+default compute service account already has `roles/editor` on
+arborfam-hub, which covers Firestore read/write, and
+`admin.credential.applicationDefault()` picks up the attached identity
+automatically. Data (`appointments`, `services`, `oauth_tokens`,
+`appointment_idempotency_keys`, `idempotency_claims` collections) lives in
+arborfam-hub's Firestore Native default database and is visible in the GCP
+Console under Firestore.
+
+**Testing against Firestore:** `pnpm run test:firestore` (repo root) runs
+`packages/api/test/firestore/*.test.js` against a real Firestore emulator
+via `firebase emulators:exec` -- it starts the emulator, runs the tests,
+tears the emulator down, and never touches the real arborfam-hub database
+(the emulator uses the fake `demo-chatnbook` project id, which needs no
+GCP credentials). Requires the `firebase` CLI and a JDK 21+ on `PATH`
+(`brew install firebase-cli openjdk@21`, then put
+`$(brew --prefix openjdk@21)/bin` ahead of the system Java on `PATH` --
+firebase-tools' emulator will refuse to start under an older JDK). This is
+**not** part of the default `pnpm test` (same as the Postgres integration
+test, which assumes `docker compose` is already up rather than starting
+it) -- run it explicitly, or wire it into CI as its own step.
+
+## Attaching a real Postgres instead
+
+To move a deployed instance onto Postgres instead of Firestore, provision
+one (e.g. Cloud SQL) and point `DATABASE_URL` at it (this takes priority
+over `FIRESTORE_PROJECT_ID` if both are set):
 
 ```bash
 gcloud run services update chatnbook-api --region us-central1 \
@@ -124,10 +163,11 @@ automatically on container start whenever `DATABASE_URL` is set.
 
 **Note:** `gcloud run deploy --set-env-vars` (used by
 `infra/deploy-cloudrun.sh`) *replaces* the service's entire env var set on
-every deploy. If you attach `DATABASE_URL` via `services update` as above,
-keep it in your repo-root `.env` too (the deploy script passes it through
-when present), or a later run of `infra/deploy-cloudrun.sh` will silently
-drop it back to in-memory mode.
+every deploy. If you attach `DATABASE_URL` or `FIRESTORE_PROJECT_ID` via
+`services update` as above, keep it in your repo-root `.env` too (the
+deploy script passes both through when present), or a later run of
+`infra/deploy-cloudrun.sh` will silently drop the service back to
+in-memory mode.
 
 ## Environment variables
 
@@ -137,7 +177,8 @@ drop it back to in-memory mode.
 | `AGENT_HMAC_SECRET` | yes | Signs/verifies agent API calls and the OAuth state parameter. |
 | `TOKEN_ENCRYPTION_KEY` | yes | `openssl rand -base64 32`; AES-256-GCM key for OAuth tokens at rest. |
 | `ADMIN_API_KEY` | for admin routes | Passed through by `infra/deploy-cloudrun.sh`; generated ephemerally if unset. |
-| `DATABASE_URL` | no | Unset = in-memory repositories (see above). Set = Postgres, migrated on start. |
+| `DATABASE_URL` | no | Unset = Firestore/in-memory (see "Repository backend selection" above). Set = Postgres, migrated on start; takes priority over `FIRESTORE_PROJECT_ID`. |
+| `FIRESTORE_PROJECT_ID` | no | Unset (and `DATABASE_URL` unset) = in-memory. Set = Firestore Native mode on that GCP project's default database. The live demo sets this to `arborfam-hub`. |
 | `SEED_DEMO_ACCOUNT` | no | Set to `acct_demo` by the compose service and deploy script. |
 | `PUBLIC_API_BASE` | no | Public base URL of the deployed API. |
 | `BUSINESS_TZ` | no | Default business timezone, e.g. `America/New_York`. |
