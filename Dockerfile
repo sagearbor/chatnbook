@@ -14,7 +14,7 @@
 # ---------------------------------------------------------------------------
 # Stage 1: build. Installs the full pnpm workspace (incl. devDependencies),
 # compiles every package, then produces a production-only, self-contained
-# copy of @smb/api (its own node_modules with just express/cors/pg).
+# copy of @smb/api (its own node_modules with just express/cors/pg/firebase-admin).
 # ---------------------------------------------------------------------------
 FROM node:22-bookworm-slim AS build
 
@@ -56,12 +56,12 @@ RUN pnpm -r build \
 
 # Produce a clean, production-only copy of @smb/api: its compiled dist/,
 # migrations/, scripts/, openapi/ and package.json, plus a fresh
-# node_modules containing only its runtime deps (express, cors, pg) -- no
+# node_modules containing only its runtime deps (express, cors, pg, firebase-admin) -- no
 # typescript/ts-node/turbo/jsdom etc. This is the officially supported pnpm
 # 9 workflow for exactly this ("pnpm deploy"); a plain `pnpm prune --prod`
 # was tried first and rejected because it strips the workspace's per-package
 # node_modules symlinks (packages/api/node_modules/*), leaving `require()`
-# unable to resolve express/cors/pg at runtime -- `pnpm deploy` doesn't have
+# unable to resolve express/cors/pg/firebase-admin at runtime -- `pnpm deploy` doesn't have
 # that problem since it builds a standalone node_modules from scratch.
 RUN pnpm --filter @smb/api --prod deploy /deploy/api
 

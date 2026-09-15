@@ -16,6 +16,9 @@ import { PgOAuthTokensRepository } from './repositories/pg-oauth-tokens-repo.js'
 import type { ServiceRecord, ServicesRepository } from './repositories/services-repo.js';
 import { InMemoryServicesRepository } from './repositories/memory-services-repo.js';
 import { PgServicesRepository } from './repositories/pg-services-repo.js';
+import { FirestoreAppointmentsRepository } from './repositories/firestore-appointments-repo.js';
+import { FirestoreOAuthTokensRepository } from './repositories/firestore-oauth-tokens-repo.js';
+import { FirestoreServicesRepository } from './repositories/firestore-services-repo.js';
 import { createOAuthRouter, getValidAccessToken, CalendarNotConnectedError } from './oauth/routes.js';
 import { isOAuthProvider } from './oauth/providers.js';
 import type { CalendarConnector } from './connectors/calendar-connector.js';
@@ -73,24 +76,42 @@ function publicBaseUrl(req: express.Request): string {
   return `${req.protocol}://${req.get('host')}`;
 }
 
-// Appointments persist to Postgres whenever DATABASE_URL is configured
-// (the normal case -- see infra/docker-compose.dev.yml and
-// migrations/001_create_appointments.sql). The in-memory repository is
-// kept as a test double for fast unit tests that don't need Docker.
+// Repository backend selection, in priority order:
+//   1. DATABASE_URL set       -> Postgres (see infra/docker-compose.dev.yml
+//      and migrations/*.sql) -- the normal choice when a real Postgres is
+//      attached.
+//   2. FIRESTORE_PROJECT_ID set -> Firestore, Native mode, the project's
+//      default database (free tier -- see docs/DEPLOY.md's Firestore
+//      section). This is what the hosted Cloud Run demo runs on: unlike
+//      the in-memory repositories, data survives a cold start/new
+//      revision without needing a paid database.
+//   3. Neither set             -> in-memory, a fast test double that needs
+//      neither Docker nor a GCP project. Used by the default unit-test run.
+const FIRESTORE_PROJECT_ID = process.env.FIRESTORE_PROJECT_ID;
+
 const appointmentsRepo: AppointmentsRepository = process.env.DATABASE_URL
   ? new PgAppointmentsRepository(process.env.DATABASE_URL)
-  : new InMemoryAppointmentsRepository();
+  : FIRESTORE_PROJECT_ID
+    ? new FirestoreAppointmentsRepository(FIRESTORE_PROJECT_ID)
+    : new InMemoryAppointmentsRepository();
 
-// Same pattern for OAuth calendar tokens (migrations/002_create_oauth_tokens.sql).
 const oauthTokensRepo: OAuthTokensRepository = process.env.DATABASE_URL
   ? new PgOAuthTokensRepository(process.env.DATABASE_URL)
-  : new InMemoryOAuthTokensRepository();
+  : FIRESTORE_PROJECT_ID
+    ? new FirestoreOAuthTokensRepository(FIRESTORE_PROJECT_ID)
+    : new InMemoryOAuthTokensRepository();
 
-// Same pattern for services (migrations/003_create_services.sql). Backs
-// GET /v1/services and lets GET /v1/availability honour a serviceId.
+// Backs GET /v1/services and lets GET /v1/availability honour a serviceId.
 const servicesRepo: ServicesRepository = process.env.DATABASE_URL
   ? new PgServicesRepository(process.env.DATABASE_URL)
-  : new InMemoryServicesRepository();
+  : FIRESTORE_PROJECT_ID
+    ? new FirestoreServicesRepository(FIRESTORE_PROJECT_ID)
+    : new InMemoryServicesRepository();
+
+if (process.env.NODE_ENV !== 'test') {
+  const backend = process.env.DATABASE_URL ? 'postgres' : FIRESTORE_PROJECT_ID ? 'firestore' : 'in-memory';
+  console.log(`repository backend: ${backend}`);
+}
 
 app.use(createOAuthRouter(oauthTokensRepo));
 

@@ -23,11 +23,12 @@
 # PREREQS: gcloud installed + `gcloud auth login`, a GCP project with
 # billing enabled. This script does not create a project or credentials.
 #
-# NOTE ON DATA: this deploys with DATABASE_URL unset unless you've set it
-# (real env or repo-root .env) -- meaning the API runs on its in-memory
-# repositories and all data resets on every cold start. See docs/DEPLOY.md
-# for how to attach a real Postgres afterwards via
-# `gcloud run services update`.
+# NOTE ON DATA: repository backend is DATABASE_URL > FIRESTORE_PROJECT_ID >
+# in-memory (see packages/api/src/index.ts). With neither set, the API
+# falls back to its in-memory repositories and all data resets on every
+# cold start. Export FIRESTORE_PROJECT_ID=arborfam-hub (or put it in
+# repo-root .env) before running this script to deploy on Firestore
+# instead -- see docs/DEPLOY.md's Firestore section.
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
@@ -148,7 +149,7 @@ ENV_VARS="${ENV_VARS}@ADMIN_API_KEY=${ADMIN_API_KEY}"
 # whole env set, so a value only ever set once via `gcloud run services
 # update` would be dropped by a later run of this script. Keep anything you
 # want to persist across deploys in .env.
-for k in DATABASE_URL GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REDIRECT_URI \
+for k in DATABASE_URL FIRESTORE_PROJECT_ID GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_REDIRECT_URI \
   MS_CLIENT_ID MS_CLIENT_SECRET MS_REDIRECT_URI MS_TENANT; do
   v="${!k:-}"
   [[ -n "$v" ]] || v="$(read_env "$k")"

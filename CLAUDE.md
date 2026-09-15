@@ -49,9 +49,19 @@ docker compose -f infra/docker-compose.dev.yml up -d
 pnpm --filter @smb/api db:migrate
 pnpm --filter @smb/api test     # node --test test/*.test.js
 
+# Firestore-backed repos, against a real Firestore emulator (not part of
+# `pnpm test` -- same reasoning as the Postgres test, see below). Needs the
+# firebase CLI + a JDK 21+ on PATH.
+pnpm run test:firestore
+
 # MCP adapter + widget smoke tests
 pnpm --filter @smb/adapters-mcp test
 pnpm --filter @smb/widget test
+
+# Browser E2E: loads the live-built widget in a real (Playwright) browser
+# and completes a booking end to end -- catches the class of bug unit
+# tests structurally can't (see "Static widget + demo page" below).
+pnpm --filter @smb/widget test:e2e
 
 # Or run everything the way CI/merge verification does (needs the Python
 # venv active and infra/docker-compose.dev.yml migrated as above first):
@@ -64,12 +74,34 @@ docker compose -f docker-compose.test.yml up -d  # Start WordPress + MySQL
 ```
 
 ### Appointment persistence
-`packages/api/src/repositories/` defines an `AppointmentsRepository` interface
-with two implementations: `PgAppointmentsRepository` (real Postgres, used
-whenever `DATABASE_URL` is set -- the normal/production case) and
-`InMemoryAppointmentsRepository` (a fast test double used when it isn't).
-Schema lives in `packages/api/migrations/*.sql`, applied via
-`pnpm --filter @smb/api db:migrate`.
+`packages/api/src/repositories/` defines an `AppointmentsRepository`
+interface (also `ServicesRepository`, `OAuthTokensRepository`) with three
+implementations each, selected in `index.ts` by priority: `DATABASE_URL`
+set -> `Pg*Repository` (real Postgres); else `FIRESTORE_PROJECT_ID` set ->
+`Firestore*Repository` (Firestore Native mode -- what the hosted Cloud Run
+demo runs on, so bookings survive a cold start with no paid database);
+else `InMemory*Repository` (fast test double, no external service
+needed). Postgres schema lives in `packages/api/migrations/*.sql`, applied
+via `pnpm --filter @smb/api db:migrate`. Firestore needs no migration --
+`packages/api/src/repositories/firestore-client.ts` holds the one shared
+Admin SDK client (`applicationDefault()` credentials, so Cloud Run's
+attached service account is used automatically; no key file). Collections:
+`appointments`, `appointment_idempotency_keys` (Idempotency-Key ->
+appointment id, kept separate from `appointments` so `createIdempotent`
+can do one transactional document read+write instead of a query),
+`idempotency_claims` (backs `tryClaim`/`releaseClaim` -- a claim's mere
+existence, created via `DocumentReference.create()` which fails
+`ALREADY_EXISTS` on a race, *is* the mutex), `services`, `oauth_tokens`
+(doc id `${accountId}__${provider}`). `listByAccountInRange` filters
+client-side after a single `accountId ==` equality query rather than a
+composite range query, deliberately, so it needs no Firestore composite
+index -- fine at demo/single-account scale. Tested against a real
+Firestore emulator: `pnpm run test:firestore` (repo root) wraps
+`packages/api/test/firestore/*.test.js` in `firebase emulators:exec`,
+using the `demo-chatnbook` fake project id so it never touches the real
+arborfam-hub database. See `docs/DEPLOY.md`'s "Repository backend
+selection" section for the full picture including redeploying with
+Firestore enabled.
 
 ### OAuth calendar connect flow
 `GET /oauth/:provider/start?accountId=...` (provider is `google` or
@@ -78,8 +110,8 @@ redirects back to `GET /oauth/:provider/callback`, which exchanges the
 code for tokens and stores them encrypted (AES-256-GCM, key from
 `TOKEN_ENCRYPTION_KEY`) in the `oauth_tokens` table (see
 `packages/api/migrations/002_create_oauth_tokens.sql`), one row per
-`(accountId, provider)`. Same Pg/in-memory-repository split as
-appointments (`packages/api/src/repositories/{oauth-tokens-repo,pg-oauth-tokens-repo,memory-oauth-tokens-repo}.ts`).
+`(accountId, provider)`. Same Pg/Firestore/in-memory repository split as
+appointments (`packages/api/src/repositories/{oauth-tokens-repo,pg-oauth-tokens-repo,firestore-oauth-tokens-repo,memory-oauth-tokens-repo}.ts`).
 `packages/api/src/oauth/routes.ts`'s `getValidAccessToken()` transparently
 refreshes an expired access token using the stored refresh token before
 handing it to a caller. State is a signed (HMAC, using
@@ -93,7 +125,7 @@ instead of the real thing -- no real client ids/secrets needed to test it.
 
 ### Services
 `GET /v1/services?accountId=...` lists real services (id, accountId, name,
-durationMinutes, bufferMinutes) backed by Postgres/in-memory (see
+durationMinutes, bufferMinutes) backed by Postgres/Firestore/in-memory (see
 `packages/api/src/repositories/services-repo.ts` and
 `migrations/003_create_services.sql`). accountId is required.
 `GET /v1/availability` honours a `serviceId` query param by looking the

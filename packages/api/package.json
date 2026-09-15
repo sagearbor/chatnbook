@@ -7,11 +7,13 @@
     "build": "tsc -p tsconfig.json && node scripts/build-openapi.js",
     "dev": "node scripts/build-openapi.js && ts-node src/index.ts",
     "db:migrate": "node scripts/migrate.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "test:firestore": "FIRESTORE_PROJECT_ID=${FIRESTORE_PROJECT_ID:-demo-chatnbook} node --test test/firestore/*.test.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.19.2",
+    "firebase-admin": "^12.7.0",
     "pg": "^8.11.0"
   },
   "devDependencies": {
