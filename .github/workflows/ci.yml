@@ -6,7 +6,19 @@ on:
   pull_request:
 
 env:
-  DATABASE_URL: postgres://user:pass@localhost:5432/smb
+  # Deliberately NOT setting DATABASE_URL here: packages/api's repository
+  # backend is selected by whether DATABASE_URL is set (see
+  # packages/api/src/index.ts), and most test files are designed to run
+  # against the fast in-memory repository -- only the handful of dedicated
+  # Postgres integration tests (appointments-postgres.test.js and friends)
+  # set their own DATABASE_URL default (matching the `postgres` service
+  # container below) themselves, once imported inside their own process.
+  # Exporting DATABASE_URL globally here would force *every* test file
+  # (including ones with zero Postgres awareness) onto the same real
+  # Postgres pool -- a documented gotcha (see this repo's
+  # tmp/wrapups/20260911-0338-*.yaml) that breaks unrelated files like
+  # openapi-discovery.test.js, which closes its repositories more than
+  # once assuming an in-memory (no-op close) backend.
   AGENT_HMAC_SECRET: ci-hmac-secret
   TOKEN_ENCRYPTION_KEY: 5eD2QwlZ0V0Q2vXJ0v3wQe8y1nQe8y1nQe8y1nQe8y0=
 
@@ -57,6 +69,8 @@ jobs:
 
       - name: Migrate Postgres
         run: pnpm --filter @smb/api db:migrate
+        env:
+          DATABASE_URL: postgres://user:pass@localhost:5432/smb
 
       - name: Full test suite (pytest + TS + adapter-gen)
         run: pnpm test
