@@ -38,7 +38,7 @@ jobs:
           node-version: 22
 
       - name: Enable corepack (pnpm)
-        run: corepack enable
+        run: corepack prepare pnpm@9 --activate
 
       - uses: actions/setup-python@v5
         with:
@@ -75,7 +75,7 @@ jobs:
           node-version: 22
 
       - name: Enable corepack (pnpm)
-        run: corepack enable
+        run: corepack prepare pnpm@9 --activate
 
       - name: Install pnpm workspace deps
         run: pnpm install --frozen-lockfile
@@ -114,7 +114,7 @@ jobs:
           java-version: '21'
 
       - name: Enable corepack (pnpm)
-        run: corepack enable
+        run: corepack prepare pnpm@9 --activate
 
       - name: Install pnpm workspace deps
         run: pnpm install --frozen-lockfile
